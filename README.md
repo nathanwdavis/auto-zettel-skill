@@ -4,9 +4,9 @@ A Claude Code plugin that scaffolds and perpetually grows a **citation-grounded
 Zettelkasten** knowledge repository on GitHub. Every sourced claim traces to a
 verified reference; notes that cannot be grounded fail a lint and never land.
 
-> **Status: Phase 1 of 4** — substrate and citation gates. The subagent
-> orchestra, scheduled maintenance runs, serendipity sweeps, and skill
-> emergence arrive in Phases 2–4. See [`PLAN.md`](PLAN.md).
+> **Status: Phase 2 of 4** — substrate, citation gates, the agent orchestra,
+> scheduled maintenance runs, and two-mode access. Serendipity sweeps (Phase 3)
+> and skill emergence (Phase 4) remain. See [`PLAN.md`](PLAN.md).
 
 ## Two repositories
 
@@ -67,6 +67,29 @@ scripts/init_content_repo.sh \
 Add `--no-remote` to scaffold and commit locally without touching GitHub. The
 script refuses to clobber an existing repo or a non-empty directory.
 
+### Maintenance — scheduled, unattended growth
+
+```sh
+scripts/maintenance_run.sh --repo <content-repo> --mailto you@example.org
+```
+
+One entrypoint for cron, launchd/systemd, or a desktop/Cowork scheduled task.
+It serializes on `run.lock`, pulls, runs a headless `claude -p` session that
+dispatches the 8-agent orchestra in isolated worktrees, then **re-runs the lint
+gates itself and pushes only if they pass** — the model commits, the wrapper
+pushes, so a runaway or budget-cut run can never push unlinted state. Budget
+and turn caps come from the content repo's `config.yml`. `--dry-run` does
+everything except the push. A working crontab line and the desktop/cloud
+caveats are in [`references/scheduling.md`](references/scheduling.md).
+
+### Remote reading (Mode B)
+
+No local clone (claude.ai, the API)? `scripts/fetch_remote.py` fetches the
+manifest and specific notes from inside a code-execution container — raw URLs
+for public repos, the GitHub API with a `GITHUB_TOKEN` env var for private
+ones (private repos otherwise require the GitHub MCP connector). All five
+remote paths: [`references/two-mode-access.md`](references/two-mode-access.md).
+
 ### The gates — run before every commit
 
 ```sh
@@ -97,7 +120,8 @@ creation — rewording a note's `title` never moves the file or breaks a link.
 skills/zettel-bootstrap/     SKILL.md (entry point)
 references/                  architecture, note types, citation rules
 templates/                   note, config, and child-skill templates
-scripts/                     genesis, manifest, verification, lints
+agents/                      the 8 subagent definitions
+scripts/                     genesis, maintenance, manifest, verification, lints
   zettel_lib/                shared library (see note below)
   csl/                       bundled Chicago style + provenance
 tests/                       pytest suite and cassettes
@@ -125,6 +149,9 @@ Two acceptance checks cannot run in a sandboxed or offline environment and are
 - Live metadata lookups — `verify_refs.py --repo <repo> --mailto you@example.org`
   against a real DOI and ISBN. The suite covers the parsing and state-writing
   with recorded-shape cassettes; see [`tests/cassettes/README.md`](tests/cassettes/README.md).
+
+The maintenance runner is tested with a stub `claude` binary (locking, gate
+enforcement, push authority) plus a real capped headless run where possible.
 
 ## Security
 

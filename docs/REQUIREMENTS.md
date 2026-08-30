@@ -49,6 +49,17 @@ key; and `manifest.json` gains an `id_to_key` map so a bare timestamp still
 resolves. `lint_links.py` fails any note whose filename stem, `key`, `slug`,
 and `id` disagree.
 
+### A3 — Push authority lives in the wrapper (2026-08-30, FR-25, FR-28)
+
+FR-28 step 10 has the headless run itself commit **and push**. At the
+repository owner's direction, pushing moves to `maintenance_run.sh`: the
+headless run performs steps 1–9 and commits, then the wrapper independently
+re-runs `build_manifest.py --check`, `lint_citations.py`, and `lint_links.py`
+and pushes only when all pass (retaining FR-28's re-pull/re-lint retry loop).
+This turns G3/NFR-3's "no unlinted push" from a prompted behaviour into a
+structural guarantee — a runaway, turn-capped, or budget-cut run cannot push.
+Observable step order in `log.md` (AC-28) is unchanged.
+
 -----
 
 ## TL;DR
@@ -275,7 +286,7 @@ All Python scripts MUST: read no secrets from the repo; accept `--help`; exit 0 
 1. Skill-smith retrospective (if its cadence is due) — §9.4.
 1. Lint gates (lint_citations, lint_links).
 1. Rebuild manifest.json + `.bib/refs.json`.
-1. Commit + push (push-rejection retry: re-pull, re-lint, retry).
+1. Commit + push (push-rejection retry: re-pull, re-lint, retry). **[Amended A3: the headless run commits; the wrapper re-lints and pushes.]**
 1. Update log.md and INBOX statuses; release `run.lock`.
    **AC-28:** steps are observable in log.md in order; a failed gate aborts before step 10.
 

@@ -25,6 +25,8 @@ Two repositories, never mixed:
 |---|---|
 | No content repo exists yet | [Genesis](#genesis) |
 | Content repo exists, user asks a question or wants growth | [Adding knowledge](#adding-knowledge) |
+| Scheduled/unattended growth | [Maintenance runs](#maintenance-runs) |
+| No local clone (claude.ai, API) | [Remote access](#remote-access-mode-b) |
 | Before any commit to the content repo | [The gates](#the-gates) |
 | User asks how a piece works | `references/` (below) |
 
@@ -107,6 +109,43 @@ Lints print `FILE⇥RULE⇥REASON` lines. Each names the note and what to fix.
 Never make a lint pass by weakening it, deleting the offending note, or
 back-filling a citation you did not verify. Fix the note or capture the source.
 
+## Maintenance runs
+
+Scheduled, unattended growth goes through one entrypoint:
+
+```sh
+scripts/maintenance_run.sh --repo <content-repo> --mailto <you@example.org>
+```
+
+What it does: acquires `run.lock` (a second concurrent run exits harmlessly),
+pulls, launches a headless run that reads INBOX first and dispatches the agent
+orchestra (orchestrator → researchers → synthesizers → note-maintainer →
+critic → librarian) in isolated worktrees, then **independently re-runs the
+gates and pushes only if they pass**. The model never pushes; the wrapper does.
+Budget and turn caps come from config.yml. Add `--dry-run` to do everything
+except the push.
+
+Schedule it with cron or a desktop/Cowork task — see `references/scheduling.md`
+for a working crontab line and the cloud caveats. Agent roles, model tiers, and
+critic thresholds are in `references/orchestra.md`.
+
+## Remote access (Mode B)
+
+With no local clone (claude.ai, the API), read the content repo remotely.
+In order of preference:
+
+1. GitHub MCP `get_file_contents` — **required for private content repos**.
+2. `scripts/fetch_remote.py` in the code-execution container (`--owner
+   --repo`, or `--manifest-url`); private repos need `GITHUB_TOKEN` in the env.
+3. A public repo's `manifest.json` carries raw URLs for every note.
+4. Ask the user for the manifest URL, or find the repo via web search, so the
+   URL enters context and server-side fetch can use it.
+5. On Claude Code itself, WebFetch may fetch manifest URLs directly.
+
+Mode B reads and reasons; it does not lint or push. Route Mode-B write
+intentions through INBOX entries for the next Mode-A run. Details and the
+private-repo rules: `references/two-mode-access.md`.
+
 ## Reference material
 
 Read these only when the task calls for them:
@@ -116,6 +155,9 @@ Read these only when the task calls for them:
 | `references/architecture.md` | Repo topology, the three layers, run flow |
 | `references/note-types.md` | Every note type, frontmatter, the 1-1-1 rule |
 | `references/citation-rules.md` | Chicago rendering, verification, scripture, source tiers |
+| `references/orchestra.md` | The 8 agents, model tiers, critic thresholds, worktrees |
+| `references/two-mode-access.md` | Mode A vs Mode B, the five remote paths, private-repo rules |
+| `references/scheduling.md` | cron/desktop scheduling, budgets, run guarantees |
 
 ## Rules that do not bend
 

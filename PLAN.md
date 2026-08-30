@@ -2,7 +2,7 @@
 
 **Source of truth:** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (all FR-x / AC-x / NFR-x / QA-x / checklist references below point there).
 **This repo:** the PRIVATE skill repo. It will contain ONLY the `zettel-bootstrap` plugin — never zettelkasten content. The content repo is created at genesis runtime by `init_content_repo.sh` and is out of scope for this repo's file tree.
-**Status:** Phase 1 complete. Phases 2-4 not started.
+**Status:** Phases 1-2 complete. Phases 3-4 not started.
 
 ---
 
