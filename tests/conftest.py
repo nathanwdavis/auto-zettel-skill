@@ -148,9 +148,91 @@ def rules(result: subprocess.CompletedProcess) -> set[str]:
     }
 
 
+def build_two_cluster_repo(root: Path) -> Path:
+    """A repo with two densely-linked clusters that share vocabulary across the divide.
+
+    Cluster A is about note atomicity, cluster B about compound interest. They
+    are linked internally but never to each other, so Louvain must find two
+    communities -- and the pair that shares the recombination idea is exactly
+    the cross-community link a sweep should surface.
+    """
+    build_clean_repo(root)
+    for path in (root / "permanent").glob("*.md"):
+        path.unlink()
+
+    clusters = {
+        "a": [
+            ("atomic-notes-compound-over-time", "202701010001",
+             "A note confined to one idea can be reused in contexts its author never "
+             "anticipated. That reuse is what makes a slip-box compound rather than "
+             "merely accumulate: each atomic note becomes a component later thinking "
+             "can recombine into new arguments."),
+            ("one-idea-per-note-enables-reuse", "202701010002",
+             "Splitting a note at its seams leaves each piece linkable on its own. A "
+             "note carrying three ideas can only ever be cited as a lump, so its "
+             "reuse is limited to contexts wanting all three at once."),
+            ("titles-stated-as-claims-force-clarity", "202701010003",
+             "Writing a note title as a claim rather than a topic forces the author "
+             "to decide what the note actually asserts, and makes the note legible "
+             "in a link list without opening it."),
+        ],
+        "b": [
+            ("reinvested-returns-compound", "202701010011",
+             "Reinvested returns themselves earn returns. The mechanism is "
+             "recombination over time: each period's gain becomes principal that "
+             "later periods compound, so growth accelerates rather than staying "
+             "linear."),
+            ("linear-growth-lacks-a-feedback-loop", "202701010012",
+             "Simple interest pays only on the original principal, so each period's "
+             "gain leaves the earning base unchanged. Without that feedback loop "
+             "growth stays a straight line however long you wait."),
+            ("time-horizon-dominates-rate", "202701010013",
+             "Over long horizons the number of compounding periods matters more than "
+             "the rate per period, because periods multiply while the rate only "
+             "scales each step."),
+        ],
+    }
+
+    keys = {name: [f"{slug}--{nid}" for slug, nid, _ in members]
+            for name, members in clusters.items()}
+
+    for name, members in clusters.items():
+        member_keys = keys[name]
+        for idx, (slug, nid, body) in enumerate(members):
+            key = member_keys[idx]
+            # Link densely WITHIN the cluster and never across it.
+            links = [{"target_id": other, "relation": "elaborates"}
+                     for other in member_keys if other != key]
+            _write(root / "permanent" / f"{key}.md", {
+                "id": nid, "key": key, "slug": slug, "aliases": [nid],
+                "type": "permanent", "title": slug.replace("-", " ").capitalize(),
+                "tags": [], "links": links,
+                "created": "2027-01-01", "updated": "2027-01-01",
+            }, body + "\n")
+
+    # The clean fixture's literature/moc notes point at a permanent note that no
+    # longer exists; repoint them at a real one so the repo stays coherent.
+    anchor = keys["a"][0]
+    lit = Note.load(root / "literature" / f"{LIT_KEY}.md")
+    lit.meta["links"] = [{"target_id": REF_KEY, "relation": "source"}]
+    lit.body = f"Own-words summary of [[{REF_KEY}]].\n"
+    lit.save()
+    moc = Note.load(root / "moc" / f"{MOC_KEY}.md")
+    moc.body = f"# Zettelkasten method\n\n## Notes\n\n- [[{anchor}]]\n"
+    moc.save()
+
+    run_script("build_manifest.py", root)
+    return root
+
+
 @pytest.fixture
 def clean_repo(tmp_path: Path) -> Path:
     return build_clean_repo(tmp_path / "kb")
+
+
+@pytest.fixture
+def two_cluster_repo(tmp_path: Path) -> Path:
+    return build_two_cluster_repo(tmp_path / "kb")
 
 
 @pytest.fixture

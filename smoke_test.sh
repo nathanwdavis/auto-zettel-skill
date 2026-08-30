@@ -7,6 +7,7 @@
 #   4. lints pass clean and fail, with reasons, on planted violations
 #   5. manifest builds, is idempotent, and honours the public/private matrix
 #   6. verification writes state; --offline verifies from raw/ captures
+#   7. serendipity sweep proposes cross-community links without editing notes
 #   8. the scaffolded repo ends lint-clean and committed
 #   8b. a stub-driven maintenance cycle runs end-to-end and pushes
 #   9. run.lock serialization: a second concurrent run aborts
@@ -32,7 +33,7 @@ trap 'rm -rf "$WORK"' EXIT
 
 # --- 2. scripts respond to --help --------------------------------------------
 step "[2] script CLI contract"
-for s in build_manifest.py lint_citations.py lint_links.py verify_refs.py fetch_remote.py; do
+for s in build_manifest.py lint_citations.py lint_links.py verify_refs.py fetch_remote.py serendipity_sweep.py; do
   "$PY" "scripts/$s" --help >/dev/null 2>&1 || fail "scripts/$s --help"
   pass "scripts/$s --help"
 done
@@ -74,6 +75,33 @@ pass "verify_refs.py --offline"
 pass "lint_citations.py exits 0 on a clean repo"
 "$PY" scripts/lint_links.py --repo "$KB" >/dev/null || fail "lint_links.py on clean repo"
 pass "lint_links.py exits 0 on a clean repo"
+
+# --- 7. serendipity sweep -----------------------------------------------------
+step "[7] serendipity sweep"
+SWEEP_KB="$WORK/kb-sweep"
+"$PY" - "$SWEEP_KB" <<'PYEOF'
+import sys
+sys.path.insert(0, "tests"); sys.path.insert(0, "scripts")
+from pathlib import Path
+from conftest import build_two_cluster_repo
+build_two_cluster_repo(Path(sys.argv[1]))
+PYEOF
+[[ -d "$SWEEP_KB" ]] || fail "sweep fixture not built"
+
+BEFORE_HASH="$(find "$SWEEP_KB" -name '*.md' -not -path '*/proposed-links/*' -not -name 'log.md' -exec sha256sum {} + | sort | sha256sum)"
+"$PY" scripts/serendipity_sweep.py --repo "$SWEEP_KB" >/dev/null || fail "serendipity_sweep.py"
+N_PROPOSALS="$(find "$SWEEP_KB/proposed-links" -name '*.md' | wc -l | tr -d ' ')"
+[[ "$N_PROPOSALS" -gt 0 ]] || fail "sweep produced no proposals"
+pass "sweep wrote $N_PROPOSALS proposal(s) to proposed-links/"
+
+AFTER_HASH="$(find "$SWEEP_KB" -name '*.md' -not -path '*/proposed-links/*' -not -name 'log.md' -exec sha256sum {} + | sort | sha256sum)"
+[[ "$BEFORE_HASH" == "$AFTER_HASH" ]] || fail "sweep modified notes"
+pass "no note was modified by the sweep"
+
+"$PY" scripts/serendipity_sweep.py --repo "$SWEEP_KB" >/dev/null || fail "sweep re-run"
+[[ "$(find "$SWEEP_KB/proposed-links" -name '*.md' | wc -l | tr -d ' ')" == "$N_PROPOSALS" ]] \
+  || fail "sweep re-run duplicated proposals"
+pass "re-run is idempotent (no duplicate proposals)"
 
 # --- 8b + 9. maintenance cycle + lock serialization ---------------------------
 step "[8b,9] stub maintenance cycle and run.lock"
