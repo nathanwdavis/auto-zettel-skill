@@ -129,11 +129,16 @@ RUN_LOG="$RESULTS_DIR/$RUN_ID.log"
 
 # One comma-separated argument: several patterns contain spaces, so this must
 # never be word-split (a split allowlist silently denies git add/commit).
-ALLOWED_TOOLS="Read,Write,Edit,Glob,Grep,Agent,WebSearch,WebFetch,Bash(python:*),Bash(python3:*),Bash(git add:*),Bash(git commit:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git merge:*),Bash(git worktree:*),Bash(git branch:*),Bash(bash:*)"
+#
+# $PYBIN is allowlisted by its resolved absolute path because that is exactly
+# how the prompt invokes it -- a bare `Bash(python3:*)` pattern does not match
+# `/path/to/.venv/bin/python ...`, which silently denies every script call.
+ALLOWED_TOOLS="Read,Write,Edit,Glob,Grep,Agent,WebSearch,WebFetch,Bash(${PYBIN}:*),Bash(python:*),Bash(python3:*),Bash(git add:*),Bash(git commit:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git merge:*),Bash(git worktree:*),Bash(git branch:*),Bash(bash:*)"
 
 set +e
 ( cd "$REPO" && "$CLAUDE_BIN" -p "$PROMPT" \
   --plugin-dir "$PLUGIN_ROOT" \
+  --add-dir "$PLUGIN_ROOT" \
   --agents "$AGENTS_JSON" \
   --output-format json \
   --max-turns "$MAX_TURNS" \

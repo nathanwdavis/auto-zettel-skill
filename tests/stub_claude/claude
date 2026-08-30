@@ -28,6 +28,15 @@ if [[ "$ALLOWED" != *"Bash(git commit:*)"* || "$ALLOWED" != *"Bash(git add:*)"* 
   exit 8
 fi
 
+# The prompt invokes scripts by absolute interpreter path, so that exact path
+# must be allowlisted or every script call is silently denied (found live).
+PYBIN_SEEN="${PYTHON:-python3}"
+PYBIN_ABS="$(command -v "$PYBIN_SEEN" 2>/dev/null || echo "$PYBIN_SEEN")"
+if [[ "$ALLOWED" != *"Bash(${PYBIN_ABS}:*)"* ]]; then
+  echo "stub: run interpreter '$PYBIN_ABS' is not allowlisted: '$ALLOWED'" >&2
+  exit 8
+fi
+
 REPO="$(printf '%s\n' "$PROMPT" | grep -oE 'repository at [^ ]+' | head -1 | awk '{print $3}' | sed 's/[.,]$//')"
 [[ -d "$REPO" ]] || { echo "stub: could not find repo in prompt" >&2; exit 9; }
 
