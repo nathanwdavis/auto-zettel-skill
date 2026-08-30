@@ -47,6 +47,14 @@ model can't be fetched, or `embedding.model` is empty, the sweep logs the
 downgrade to `log.md`, warns on stderr, and continues with lexical scoring. It
 never fails a maintenance run over a missing optional dependency.
 
+The same holds for community detection: `networkx` is a refinement, not a
+requirement. The graph itself is a stdlib adjacency map, and if networkx can't
+be imported the sweep partitions by connected components instead of Louvain,
+logs the downgrade, and carries on. Connected components is the conservative
+choice — it yields *coarser* communities, so more pairs count as
+same-community and the sweep under-proposes rather than inventing serendipity
+that isn't there.
+
 Lexical scoring folds plurals into singulars (`compounds` → `compound`) so a
 kinship isn't missed over one letter, but deliberately stops short of full
 stemming, which merges unrelated words.
@@ -70,7 +78,8 @@ look and bad at knowing whether they mean anything.
 
 - **Never edits notes.** Proposals only — tested by hashing every note before
   and after a sweep.
-- **Always exits 0.** A sweep is advisory; it must not fail a maintenance run.
+- **Always exits 0.** A sweep is advisory; it must not fail a maintenance run —
+  including when an optional dependency is missing entirely.
 - **Idempotent.** Re-running never duplicates a proposal for a pair already in
   the queue.
 - **Deterministic.** Same notes in, same communities and scores out.

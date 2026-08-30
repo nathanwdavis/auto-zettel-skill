@@ -67,35 +67,77 @@ def load_notes(repo: ContentRepo) -> list[Note]:
     return notes
 
 
-def build_graph(notes: list[Note], id_to_key: dict[str, str]):
-    """Undirected typed-link graph over note keys."""
-    import networkx as nx
+def build_graph(notes: list[Note], id_to_key: dict[str, str]) -> dict[str, set[str]]:
+    """Undirected typed-link graph over note keys, as a plain adjacency map.
 
-    graph = nx.Graph()
+    Deliberately stdlib: networkx is an optional refinement for community
+    detection, never a hard requirement, because this script promises to always
+    exit 0 and must not crash a maintenance run over a missing import.
+    """
     keys = {n.key for n in notes}
-    graph.add_nodes_from(sorted(keys))
+    graph: dict[str, set[str]] = {key: set() for key in sorted(keys)}
     for note in notes:
-        targets = {str(link.get("target_id", "")) for link in note.links}
-        for target in targets:
+        for link in note.links:
+            target = str(link.get("target_id", ""))
             resolved = target if target in keys else id_to_key.get(target, "")
             if resolved in keys and resolved != note.key:
-                graph.add_edge(note.key, resolved)
+                graph[note.key].add(resolved)
+                graph[resolved].add(note.key)
     return graph
 
 
-def detect_communities(graph) -> dict[str, int]:
-    from networkx.algorithms.community import louvain_communities
+def _connected_components(graph: dict[str, set[str]]) -> list[list[str]]:
+    """Stdlib fallback partition: one community per connected component."""
+    seen: set[str] = set()
+    components = []
+    for start in sorted(graph):
+        if start in seen:
+            continue
+        stack, component = [start], []
+        seen.add(start)
+        while stack:
+            node = stack.pop()
+            component.append(node)
+            for neighbour in sorted(graph[node]):
+                if neighbour not in seen:
+                    seen.add(neighbour)
+                    stack.append(neighbour)
+        components.append(sorted(component))
+    return components
 
-    if graph.number_of_nodes() == 0:
-        return {}
-    communities = louvain_communities(graph, seed=LOUVAIN_SEED)
+
+def detect_communities(graph: dict[str, set[str]]) -> tuple[dict[str, int], str]:
+    """Partition the graph, returning ``(key -> community id, method)``.
+
+    Louvain splits *within* a connected component, so it finds finer structure;
+    connected components is the conservative fallback -- coarser communities
+    mean fewer pairs count as cross-community, so a degraded run under-proposes
+    rather than inventing serendipity that isn't there.
+    """
+    if not graph:
+        return {}, "none"
+    try:
+        import networkx as nx
+        from networkx.algorithms.community import louvain_communities
+
+        nx_graph = nx.Graph()
+        nx_graph.add_nodes_from(graph)
+        nx_graph.add_edges_from(
+            (a, b) for a, neighbours in graph.items() for b in neighbours if a < b)
+        communities = [sorted(c) for c in louvain_communities(nx_graph, seed=LOUVAIN_SEED)]
+        method = "louvain"
+    except ImportError:
+        communities = _connected_components(graph)
+        method = "connected-components"
+
     # Sort for determinism: same graph in, same community ids out.
-    ordered = sorted((sorted(c) for c in communities), key=lambda c: c[0])
-    return {key: idx for idx, members in enumerate(ordered) for key in members}
+    ordered = sorted(communities, key=lambda c: c[0])
+    return {key: idx for idx, members in enumerate(ordered) for key in members}, method
 
 
-def existing_edges(graph) -> set[tuple[str, str]]:
-    return {tuple(sorted(edge)) for edge in graph.edges()}
+def existing_edges(graph: dict[str, set[str]]) -> set[tuple[str, str]]:
+    return {tuple(sorted((a, b)))
+            for a, neighbours in graph.items() for b in neighbours}
 
 
 def existing_proposals(out_dir: Path) -> set[tuple[str, str]]:
@@ -193,8 +235,13 @@ def main(argv: list[str] | None = None) -> int:
 
     id_to_key = {n.id: n.key for n in notes if n.id}
     graph = build_graph(notes, id_to_key)
-    communities = detect_communities(graph)
+    communities, method = detect_communities(graph)
     n_communities = len(set(communities.values()))
+    if method == "connected-components":
+        note = ("networkx unavailable; using connected components instead of "
+                "Louvain (coarser communities, so fewer proposals)")
+        print(f"warning: {note}", file=sys.stderr)
+        repo.append_log(f"serendipity_sweep: DEGRADED {note}")
 
     docs = {n.key: f"{n.title}\n{n.body}" for n in notes}
     pairs = scorer.score_pairs(docs)
@@ -212,8 +259,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"proposed\t{repo.rel(path)}\t{pair.score}")
 
     summary = (f"{len(chosen)} proposal(s) from {len(notes)} notes in "
-               f"{n_communities} communities (scorer={scorer.name}, "
-               f"threshold={threshold})")
+               f"{n_communities} communities via {method} "
+               f"(scorer={scorer.name}, threshold={threshold})")
     print(f"serendipity_sweep: {summary}")
     repo.append_log(f"serendipity_sweep: {summary}")
     return EXIT_OK

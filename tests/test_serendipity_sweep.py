@@ -58,11 +58,9 @@ def test_louvain_finds_the_two_planted_clusters(two_cluster_repo):
     notes = serendipity_sweep.load_notes(repo)
     id_to_key = {n.id: n.key for n in notes if n.id}
     graph = serendipity_sweep.build_graph(notes, id_to_key)
-    communities = serendipity_sweep.detect_communities(graph)
+    communities, method = serendipity_sweep.detect_communities(graph)
 
-    atomic_cluster = {k for k in communities if k.split("--")[-1].startswith("20270101001")}
-    compound_cluster = {k for k in communities if k.split("--")[-1].startswith("2027010100")
-                        and k not in atomic_cluster}
+    assert method == "louvain"
     assert communities[ATOMIC_KEY] != communities[COMPOUND_KEY], \
         "the two planted clusters must land in different communities"
 
@@ -81,6 +79,50 @@ def test_communities_are_deterministic(two_cluster_repo):
     graph = serendipity_sweep.build_graph(notes, id_to_key)
     assert (serendipity_sweep.detect_communities(graph)
             == serendipity_sweep.detect_communities(graph))
+
+
+def test_graph_is_a_plain_adjacency_map(two_cluster_repo):
+    """networkx must stay optional: the graph itself is stdlib."""
+    repo = ContentRepo(two_cluster_repo)
+    notes = serendipity_sweep.load_notes(repo)
+    graph = serendipity_sweep.build_graph(notes, {n.id: n.key for n in notes if n.id})
+    assert isinstance(graph, dict)
+    assert all(isinstance(v, set) for v in graph.values())
+    # edges are symmetric
+    for node, neighbours in graph.items():
+        for neighbour in neighbours:
+            assert node in graph[neighbour]
+
+
+def test_falls_back_to_connected_components_without_networkx(two_cluster_repo, monkeypatch):
+    """A missing optional import must never crash a sweep (it promises exit 0)."""
+    import builtins
+    real_import = builtins.__import__
+
+    def no_networkx(name, *args, **kwargs):
+        if name.startswith("networkx"):
+            raise ImportError("No module named 'networkx'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_networkx)
+    repo = ContentRepo(two_cluster_repo)
+    notes = serendipity_sweep.load_notes(repo)
+    graph = serendipity_sweep.build_graph(notes, {n.id: n.key for n in notes if n.id})
+    communities, method = serendipity_sweep.detect_communities(graph)
+
+    assert method == "connected-components"
+    assert communities[ATOMIC_KEY] != communities[COMPOUND_KEY], \
+        "disconnected clusters must still separate without networkx"
+
+
+def test_connected_components_partition_is_a_valid_cover(two_cluster_repo):
+    repo = ContentRepo(two_cluster_repo)
+    notes = serendipity_sweep.load_notes(repo)
+    graph = serendipity_sweep.build_graph(notes, {n.id: n.key for n in notes if n.id})
+    components = serendipity_sweep._connected_components(graph)
+    flat = [k for c in components for k in c]
+    assert sorted(flat) == sorted(graph), "every node in exactly one component"
+    assert len(flat) == len(set(flat))
 
 
 # --- selection policy ---------------------------------------------------------
@@ -244,6 +286,38 @@ def test_injected_embedding_scorer_drives_the_embedding_path(two_cluster_repo, m
 
 
 # --- contract -----------------------------------------------------------------
+
+def test_sweep_survives_a_missing_networkx_end_to_end(two_cluster_repo):
+    """Run the real CLI under an interpreter that cannot import networkx."""
+    import subprocess, sys, textwrap
+    from conftest import SCRIPTS
+
+    # A sitecustomize that makes `import networkx` fail, injected via PYTHONPATH.
+    blocker = two_cluster_repo.parent / "blocker"
+    blocker.mkdir(exist_ok=True)
+    (blocker / "sitecustomize.py").write_text(textwrap.dedent("""
+        import sys
+        class _Blocker:
+            def find_module(self, name, path=None):
+                if name.split('.')[0] == 'networkx':
+                    return self
+            def load_module(self, name):
+                raise ImportError("No module named 'networkx'")
+        sys.meta_path.insert(0, _Blocker())
+    """), encoding="utf-8")
+
+    import os
+    env = {**os.environ, "PYTHONPATH": str(blocker)}
+    result = subprocess.run(
+        [sys.executable, str(SCRIPTS / "serendipity_sweep.py"), "--repo", str(two_cluster_repo)],
+        capture_output=True, text=True, env=env)
+
+    assert result.returncode == 0, f"sweep must exit 0 without networkx:\n{result.stderr}"
+    assert "connected-components" in result.stdout
+    assert "networkx unavailable" in result.stderr
+    assert "DEGRADED" in (two_cluster_repo / "log.md").read_text(encoding="utf-8")
+    assert proposals(two_cluster_repo), "degraded run must still propose"
+
 
 def test_sweep_logs_its_summary(two_cluster_repo):
     sweep(two_cluster_repo)

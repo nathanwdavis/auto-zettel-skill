@@ -16,6 +16,8 @@ PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO=""; MAILTO=""; DRY_RUN=0
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 PYBIN="${PYTHON:-python3}"
+command -v "$PYBIN" >/dev/null 2>&1 || { echo "error: python not found: $PYBIN" >&2; exit 1; }
+PYBIN="$(command -v "$PYBIN")"
 STALE_LOCK_HOURS="${STALE_LOCK_HOURS:-6}"
 
 usage() {
@@ -113,7 +115,8 @@ log "maintenance_run: step 1 lock acquired, pulled, HEAD=${PRE_HEAD:0:9}"
 VERIFY_ARGS="--offline"
 [[ -n "$MAILTO" ]] && VERIFY_ARGS="--mailto $MAILTO"
 PROMPT="$(sed -e "s|{{REPO}}|$REPO|g" -e "s|{{VERIFY_ARGS}}|$VERIFY_ARGS|g" \
-  -e "s|{{SCRIPTS}}|$SCRIPT_DIR|g" "$SCRIPT_DIR/maintenance_prompt.md")"
+  -e "s|{{SCRIPTS}}|$SCRIPT_DIR|g" -e "s|{{PYTHON}}|$PYBIN|g" \
+  "$SCRIPT_DIR/maintenance_prompt.md")"
 AGENTS_JSON="$(PYTHONPATH="$SCRIPT_DIR" "$PYBIN" -m zettel_lib.agents --repo "$REPO")" \
   || die "failed to build agents JSON from config.yml"
 
