@@ -129,6 +129,21 @@ Schedule it with cron or a desktop/Cowork task — see `references/scheduling.md
 for a working crontab line and the cloud caveats. Agent roles, model tiers, and
 critic thresholds are in `references/orchestra.md`.
 
+## Finding unplanned connections
+
+```sh
+scripts/serendipity_sweep.py --repo <content-repo>
+```
+
+Builds the link graph, detects communities, and writes cross-community
+candidates into `proposed-links/` — pairs of notes that sit in different parts
+of the graph but score as related. It never edits notes and always exits 0.
+
+A candidate is **not** a link. Read both notes: keep and justify the ones that
+hold up, delete the rest. The critic writes accepted links into both notes.
+Runs on `connector_cadence`, not every cycle. See
+`references/serendipity.md`.
+
 ## Remote access (Mode B)
 
 With no local clone (claude.ai, the API), read the content repo remotely.
@@ -158,6 +173,7 @@ Read these only when the task calls for them:
 | `references/orchestra.md` | The 8 agents, model tiers, critic thresholds, worktrees |
 | `references/two-mode-access.md` | Mode A vs Mode B, the five remote paths, private-repo rules |
 | `references/scheduling.md` | cron/desktop scheduling, budgets, run guarantees |
+| `references/serendipity.md` | the sweep: candidate selection, backends, thresholds |
 
 ## Rules that do not bend
 

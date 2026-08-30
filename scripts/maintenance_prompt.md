@@ -19,9 +19,13 @@ Step 4. Routine maintenance: delegate to the `note-maintainer` agent for the
 fleeting sweep, INBOX-driven revisions, and link repair.
 
 Step 5. Connector sweep — ONLY if config.yml `connector_cadence` is due (check
-log.md for the last `connector:` entry). If due, delegate to the `connector`
-agent; its proposals go to proposed-links/ and the critic reviews them:
-accepted links are written into BOTH notes, rejections are logged.
+log.md for the last `serendipity_sweep:` entry). If due:
+    python3 {{SCRIPTS}}/serendipity_sweep.py --repo {{REPO}}
+then delegate to the `connector` agent to read both notes of each candidate,
+keep and justify the real ones, and delete the rest. The critic then reviews
+what survives: accepted links are written into BOTH notes, rejections logged.
+The sweep never edits notes and always exits 0 — a degraded scorer is a logged
+warning, not a failure.
 
 Step 6. Delegate to the `critic` agent to gate every new or changed note:
 groundedness (flag < 0.80, block < 0.70), atomicity, clarity, link quality.
