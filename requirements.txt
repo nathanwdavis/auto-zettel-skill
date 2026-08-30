@@ -1,0 +1,15 @@
+# Runtime dependencies for the zettel-bootstrap scripts.
+
+PyYAML>=6.0            # note frontmatter and config.yml
+requests>=2.31         # metadata lookups in verify_refs.py
+
+# Chicago rendering. pandoc is the PRIMARY backend: citeproc-py ignores the
+# bundled style's `initialize="false"` overrides and renders "L. Tang" where
+# Chicago requires "Liyan Tang" (see references/citation-rules.md).
+# pypandoc-binary ships a pandoc build, so no system install is needed.
+pypandoc-binary>=1.13
+
+# Fallback renderer, kept wired per NFR-5 for environments that cannot run
+# pandoc. Its Chicago output is NOT authoritative -- see citation-rules.md.
+citeproc-py>=0.6
+lxml>=4.9              # required by citeproc-py
