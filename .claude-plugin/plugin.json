@@ -1,0 +1,9 @@
+{
+  "name": "zettel-bootstrap",
+  "version": "0.1.0",
+  "description": "Scaffolds and perpetually grows a citation-grounded Zettelkasten knowledge repository on GitHub, with hard lint gates that reject any claim not traceable to a verified source.",
+  "author": {
+    "name": "nathanwdavis"
+  },
+  "repository": "https://github.com/nathanwdavis/auto-zettel-skill"
+}
