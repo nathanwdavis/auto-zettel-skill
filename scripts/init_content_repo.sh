@@ -155,6 +155,7 @@ printf '[]\n' > .bib/refs.json
 
 cat > .gitignore <<'IGNORE'
 run.lock
+.worktrees/
 __pycache__/
 *.py[cod]
 .venv/

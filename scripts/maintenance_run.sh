@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+# Cron entrypoint for a zettel-bootstrap maintenance run (FR-25, FR-28, FR-30).
+#
+# Wraps a headless `claude -p` invocation. The headless run performs the
+# maintenance cycle and COMMITS but never pushes; this wrapper then re-runs the
+# lint gates independently and pushes only if they pass (amendment A3), so a
+# runaway or budget-cut run structurally cannot push unlinted state.
+#
+# Serialized via run.lock: a second concurrent run exits 0 without work.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+REPO=""; MAILTO=""; DRY_RUN=0
+CLAUDE_BIN="${CLAUDE_BIN:-claude}"
+PYBIN="${PYTHON:-python3}"
+STALE_LOCK_HOURS="${STALE_LOCK_HOURS:-6}"
+
+usage() {
+  cat <<'USAGE'
+Usage: maintenance_run.sh --repo <content-repo> [--mailto <email>]
+                          [--dry-run] [--claude-bin <path>]
+
+  --repo        path to the content repository (required)
+  --mailto      contact email for Crossref polite-pool routing
+  --dry-run     run everything, including the gates, but never push
+  --claude-bin  claude binary to invoke              [default: claude]
+
+Environment: CLAUDE_BIN, PYTHON, STALE_LOCK_HOURS override defaults.
+Exit codes: 0 ok (or lock held by a fresh run); non-zero on any failure.
+USAGE
+}
+
+die() { echo "error: $*" >&2; exit 1; }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo) REPO="${2:-}"; shift 2 ;;
+    --mailto) MAILTO="${2:-}"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    --claude-bin) CLAUDE_BIN="${2:-}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; die "unknown argument: $1" ;;
+  esac
+done
+
+[[ -n "$REPO" ]] || { usage >&2; die "--repo is required"; }
+[[ -d "$REPO" ]] || die "not a directory: $REPO"
+REPO="$(cd "$REPO" && pwd)"
+command -v "$CLAUDE_BIN" >/dev/null 2>&1 || die "claude binary not found: $CLAUDE_BIN"
+
+STAMP() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+log() { echo "- \`$(STAMP)\` $*" >> "$REPO/log.md"; }
+
+# --- step 1: run.lock (FR-30) -------------------------------------------------
+LOCK="$REPO/run.lock"
+if ( set -C; echo "pid=$$ started=$(STAMP)" > "$LOCK" ) 2>/dev/null; then
+  trap 'rm -f "$LOCK"' EXIT
+else
+  # A lock exists. Fresh -> another run is active; stale -> break it.
+  lock_mtime="$("$PYBIN" -c "import os,sys;print(int(os.path.getmtime(sys.argv[1])))" "$LOCK" 2>/dev/null || echo 0)"
+  age_s=$(( $(date +%s) - lock_mtime ))
+  if (( age_s < STALE_LOCK_HOURS * 3600 )); then
+    echo "maintenance_run: another run holds run.lock (age ${age_s}s); exiting without work"
+    exit 0
+  fi
+  echo "warning: breaking stale run.lock (age ${age_s}s > ${STALE_LOCK_HOURS}h)" >&2
+  rm -f "$LOCK"
+  ( set -C; echo "pid=$$ started=$(STAMP)" > "$LOCK" ) || die "could not acquire run.lock"
+  trap 'rm -f "$LOCK"' EXIT
+fi
+
+# --- config (AC-2: missing keys hard-fail) ------------------------------------
+CFG_JSON="$(PYTHONPATH="$SCRIPT_DIR" "$PYBIN" - "$REPO" <<'PYEOF'
+import json, sys
+from zettel_lib.repo import ContentRepo, dig
+repo = ContentRepo(sys.argv[1])
+cfg = repo.require_config(
+    "topics", "cadence", "budget.usd", "budget.max_turns", "autonomy_level",
+    "content_repo.name", "content_repo.owner", "content_repo.visibility",
+    "models.strong", "models.cheap", "connector_cadence", "skill_smith_cadence")
+print(json.dumps({
+    "budget_usd": dig(cfg, "budget.usd"),
+    "max_turns": dig(cfg, "budget.max_turns"),
+    "strong": dig(cfg, "models.strong"),
+}))
+PYEOF
+)" || { log "maintenance_run: ABORT invalid config.yml"; die "config.yml validation failed"; }
+
+BUDGET_USD="$(echo "$CFG_JSON" | "$PYBIN" -c 'import json,sys;print(json.load(sys.stdin)["budget_usd"])')"
+MAX_TURNS="$(echo "$CFG_JSON" | "$PYBIN" -c 'import json,sys;print(json.load(sys.stdin)["max_turns"])')"
+STRONG_MODEL="$(echo "$CFG_JSON" | "$PYBIN" -c 'import json,sys;print(json.load(sys.stdin)["strong"])')"
+
+# --- pull + clean-tree preflight ----------------------------------------------
+if ! git -C "$REPO" diff --quiet || ! git -C "$REPO" diff --cached --quiet; then
+  log "maintenance_run: ABORT dirty working tree"
+  die "content repo has uncommitted changes; refusing to run"
+fi
+if git -C "$REPO" remote get-url origin >/dev/null 2>&1; then
+  git -C "$REPO" pull -q --ff-only origin "$(git -C "$REPO" branch --show-current)" \
+    || { log "maintenance_run: ABORT pull failed"; die "git pull failed"; }
+  HAS_REMOTE=1
+else
+  HAS_REMOTE=0
+fi
+PRE_HEAD="$(git -C "$REPO" rev-parse HEAD)"
+log "maintenance_run: start (mode=A dry_run=${DRY_RUN})"
+log "maintenance_run: step 1 lock acquired, pulled, HEAD=${PRE_HEAD:0:9}"
+
+# --- render prompt + agents JSON ----------------------------------------------
+VERIFY_ARGS="--offline"
+[[ -n "$MAILTO" ]] && VERIFY_ARGS="--mailto $MAILTO"
+PROMPT="$(sed -e "s|{{REPO}}|$REPO|g" -e "s|{{VERIFY_ARGS}}|$VERIFY_ARGS|g" \
+  -e "s|{{SCRIPTS}}|$SCRIPT_DIR|g" "$SCRIPT_DIR/maintenance_prompt.md")"
+AGENTS_JSON="$(PYTHONPATH="$SCRIPT_DIR" "$PYBIN" -m zettel_lib.agents --repo "$REPO")" \
+  || die "failed to build agents JSON from config.yml"
+
+# --- steps 2-10: the headless run (FR-25) -------------------------------------
+RESULTS_DIR="${RESULTS_DIR:-$REPO/../$(basename "$REPO")-runs}"
+mkdir -p "$RESULTS_DIR"
+RUN_ID="$(date -u +%Y%m%d%H%M%S)"
+RESULT_JSON="$RESULTS_DIR/$RUN_ID.json"
+RUN_LOG="$RESULTS_DIR/$RUN_ID.log"
+
+# One comma-separated argument: several patterns contain spaces, so this must
+# never be word-split (a split allowlist silently denies git add/commit).
+ALLOWED_TOOLS="Read,Write,Edit,Glob,Grep,Agent,WebSearch,WebFetch,Bash(python:*),Bash(python3:*),Bash(git add:*),Bash(git commit:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git merge:*),Bash(git worktree:*),Bash(git branch:*),Bash(bash:*)"
+
+set +e
+( cd "$REPO" && "$CLAUDE_BIN" -p "$PROMPT" \
+  --plugin-dir "$PLUGIN_ROOT" \
+  --agents "$AGENTS_JSON" \
+  --output-format json \
+  --max-turns "$MAX_TURNS" \
+  --max-budget-usd "$BUDGET_USD" \
+  --model "$STRONG_MODEL" \
+  --allowedTools "$ALLOWED_TOOLS" \
+  --permission-mode dontAsk \
+  > "$RESULT_JSON" 2> "$RUN_LOG" )
+CLAUDE_EXIT=$?
+set -e
+
+if [[ $CLAUDE_EXIT -ne 0 ]]; then
+  log "maintenance_run: ABORT claude exited $CLAUDE_EXIT (turn/budget cutoff or error); nothing pushed"
+  echo "claude run failed (exit $CLAUDE_EXIT); see $RUN_LOG" >&2
+  echo "committed-but-unpushed work, if any, is preserved in $REPO" >&2
+  exit "$CLAUDE_EXIT"
+fi
+log "maintenance_run: headless run complete (result: $RESULT_JSON)"
+
+# --- independent gates (amendment A3; NFR-3) ----------------------------------
+GATES_OK=1
+for gate in "build_manifest.py --check" "lint_citations.py" "lint_links.py"; do
+  if ! PYTHONPATH="$SCRIPT_DIR" "$PYBIN" $SCRIPT_DIR/${gate%% *} --repo "$REPO" ${gate#*.py} >> "$RUN_LOG" 2>&1; then
+    log "maintenance_run: GATE FAILED ${gate%% *}; nothing pushed"
+    GATES_OK=0
+  fi
+done
+if [[ $GATES_OK -eq 0 ]]; then
+  echo "gate failure after headless run; commits preserved locally, nothing pushed (see $RUN_LOG)" >&2
+  exit 1
+fi
+log "maintenance_run: gates passed independently"
+
+# --- push with retry (FR-28 step 10) ------------------------------------------
+if [[ $DRY_RUN -eq 1 ]]; then
+  log "maintenance_run: dry-run, push skipped; HEAD=$(git -C "$REPO" rev-parse --short HEAD)"
+  echo "dry-run complete; nothing pushed"
+  exit 0
+fi
+if [[ $HAS_REMOTE -eq 0 ]]; then
+  log "maintenance_run: no origin remote; push skipped"
+  echo "no origin remote configured; commits are local only"
+  exit 0
+fi
+
+BRANCH="$(git -C "$REPO" branch --show-current)"
+for attempt in 1 2 3; do
+  if git -C "$REPO" push origin "$BRANCH" >> "$RUN_LOG" 2>&1; then
+    log "maintenance_run: pushed $(git -C "$REPO" rev-parse --short HEAD) (attempt $attempt)"
+    echo "maintenance run complete; pushed $(git -C "$REPO" rev-parse --short HEAD)"
+    exit 0
+  fi
+  log "maintenance_run: push rejected (attempt $attempt); re-pulling and re-linting"
+  git -C "$REPO" pull --no-rebase origin "$BRANCH" >> "$RUN_LOG" 2>&1 \
+    || { log "maintenance_run: ABORT re-pull failed"; die "push retry: pull failed"; }
+  for lint in lint_citations.py lint_links.py; do
+    PYTHONPATH="$SCRIPT_DIR" "$PYBIN" "$SCRIPT_DIR/$lint" --repo "$REPO" >> "$RUN_LOG" 2>&1 \
+      || { log "maintenance_run: ABORT re-lint failed after merge"; die "push retry: $lint failed after merge"; }
+  done
+done
+log "maintenance_run: ABORT push failed after 3 attempts"
+die "push failed after 3 attempts; see $RUN_LOG"
