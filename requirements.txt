@@ -2,6 +2,7 @@
 
 PyYAML>=6.0            # note frontmatter and config.yml
 requests>=2.31         # metadata lookups in verify_refs.py
+networkx>=3.4          # link graph + native Louvain in serendipity_sweep.py
 
 # Chicago rendering. pandoc is the PRIMARY backend: citeproc-py ignores the
 # bundled style's `initialize="false"` overrides and renders "L. Tang" where
