@@ -5,6 +5,63 @@
 **Status:** Complete spec (may be built in phases; all phases specified)
 **Date:** 2026-08-30
 
+-----
+
+## Amendments (applied during implementation)
+
+Recorded here rather than silently editing the prose above. Both were forced by
+facts checked against upstream at build time, exactly as the Caveats section
+anticipates.
+
+### A1 — CSL style filename (2026-08-30, FR-8, FR-13)
+
+The spec names `chicago-fullnote-bibliography.csl`. Upstream renamed the style;
+that filename now 404s in the citation-style-language/styles repository, while
+`chicago-notes-bibliography.csl` resolves and carries the title "Chicago Manual
+of Style 18th edition (notes and bibliography)" — the style FR-8 describes. The
+file is bundled under the current upstream name at
+`scripts/csl/chicago-notes-bibliography.csl`, with provenance and its CC BY-SA
+3.0 attribution in `scripts/csl/README.md`.
+
+**Related:** FR-8 names `citeproc-py` as the primary renderer with a pandoc
+fallback, and provides for switching "if `citeproc-py` cannot render valid
+Chicago fullnote strings on the real fixtures". It cannot: the style overrides a
+global `initialize-with` with 173 `<name initialize="false">` elements, which
+citeproc-py ignores, rendering "L. Tang" where Chicago requires "Liyan Tang".
+**Pandoc is therefore the primary backend and citeproc-py the fallback.**
+`pypandoc-binary` ships a pandoc build so this needs no system install. See
+`references/citation-rules.md`.
+
+### A2 — Note filenames use the title-slug key (2026-08-30, FR-3, FR-5)
+
+FR-5 specifies the bare timestamp ID as the filename stem. At the repository
+owner's direction, filenames and links instead use the **note key**
+`<title-slug>--<timestamp-id>`, e.g.
+`atomic-notes-compound-over-time--202608301412.md`, so a vault listing reads as
+titles rather than timestamps.
+
+FR-5's substance is preserved: the timestamp `id` remains the immutable
+identity, there is still no folgezettel, and the relation taxonomy is unchanged.
+The slug is **frozen at creation**, so rewording a note's `title` never moves a
+file or breaks a link. Frontmatter carries `id`, `slug`, `key`, and
+`aliases: [<id>]`; body links use `[[key]]`; frontmatter `target_id` holds the
+key; and `manifest.json` gains an `id_to_key` map so a bare timestamp still
+resolves. `lint_links.py` fails any note whose filename stem, `key`, `slug`,
+and `id` disagree.
+
+### A3 — Push authority lives in the wrapper (2026-08-30, FR-25, FR-28)
+
+FR-28 step 10 has the headless run itself commit **and push**. At the
+repository owner's direction, pushing moves to `maintenance_run.sh`: the
+headless run performs steps 1–9 and commits, then the wrapper independently
+re-runs `build_manifest.py --check`, `lint_citations.py`, and `lint_links.py`
+and pushes only when all pass (retaining FR-28's re-pull/re-lint retry loop).
+This turns G3/NFR-3's "no unlinted push" from a prompted behaviour into a
+structural guarantee — a runaway, turn-capped, or budget-cut run cannot push.
+Observable step order in `log.md` (AC-28) is unchanged.
+
+-----
+
 ## TL;DR
 
 - Build `zettel-bootstrap`, a topic-agnostic “seed DNA” Claude Code skill that scaffolds and then perpetually grows a citation-grounded, Zettelkasten-style knowledge repository on GitHub using an orchestra of parallel Claude subagents, scheduled headless runs, and a quality-gated skill-emergence loop adapted from WikiSkill (Liyan Tang, Cyrus Rashtchian, Chun-Sung Ferng, Andrew Tomkins, Da-Cheng Juan, and Tu Vu, “WikiSkill: Compiling Agent Experience into Persistent Knowledge for Skill Evolution,” arXiv:2608.27454, submitted 27 Aug 2026).
@@ -102,7 +159,7 @@ Full substrate layout in §4.1.
 
 **FR-2 (config.yml).** MUST contain at minimum: `topics: []`, `cadence` (cron-like or human string), `budget` (per-run USD cap + max-turns), `autonomy_level`, `content_repo: {name, owner, visibility}`, `embedding: {enabled, model}`, `models: {strong, cheap}`, `connector_cadence`, `skill_smith_cadence`. **AC-2:** genesis writes all keys; maintenance reads them; missing required keys hard-fail with a clear message.
 
-**FR-3 (manifest.json).** Each note entry MUST include: `id`, `type`, `title`, `tags[]`, `links[]` (each `{target_id, relation}`), `path`, `url_or_apipath`, `updated` (ISO-8601). **AC-3:** `build_manifest.py` regenerates deterministically from note frontmatter; running it twice with no note changes produces a byte-identical file (idempotent).
+**FR-3 (manifest.json).** **[Amended A2: entries also carry `key` and `slug`, and the manifest carries a top-level `id_to_key` map.]** Each note entry MUST include: `id`, `type`, `title`, `tags[]`, `links[]` (each `{target_id, relation}`), `path`, `url_or_apipath`, `updated` (ISO-8601). **AC-3:** `build_manifest.py` regenerates deterministically from note frontmatter; running it twice with no note changes produces a byte-identical file (idempotent).
 
 ### 4.2 Note types & rules
 
@@ -114,7 +171,7 @@ Full substrate layout in §4.1.
 - **reference:** exactly one per source; CSL-JSON frontmatter + `chicago_note` + `chicago_bib` strings + `source_tier` + `verification` block `{method, source, verified(bool), date}` + `raw_capture` path.
 - **structure/MOC:** INDEX links only to MOCs; MOCs link to notes.
 
-**FR-5 (IDs & links).** Timestamp-based immutable IDs (e.g., `202608301412`) used as filename stem AND frontmatter `id`; optional `slug`; **NO folgezettel**. Body links use Obsidian-style `[[id|slug]]`; typed links live in frontmatter with taxonomy: `supports, contradicts, analogous, shared-concept, historical-connection, elaborates, refutes, source`. **AC-5:** lint_links rejects any typed link whose relation is outside this taxonomy or whose `target_id` is absent from manifest.
+**FR-5 (IDs & links).** Timestamp-based immutable IDs (e.g., `202608301412`) used as filename stem AND frontmatter `id`; optional `slug`; **[Amended A2: filenames and links use the note key `<title-slug>--<id>`; the `id` stays immutable and the slug is frozen at creation.]** **NO folgezettel**. Body links use Obsidian-style `[[id|slug]]`; typed links live in frontmatter with taxonomy: `supports, contradicts, analogous, shared-concept, historical-connection, elaborates, refutes, source`. **AC-5:** lint_links rejects any typed link whose relation is outside this taxonomy or whose `target_id` is absent from manifest.
 
 **FR-6 (inquiry lifecycle).** Optional `/inquiries/<id>.md` files move `new → in-progress → answered → archived`, each carrying `result_notes` backlinks to the permanent notes that answered them. **AC-6:** an inquiry marked `answered` MUST have ≥1 `result_notes` backlink resolvable in manifest.
 
@@ -124,7 +181,7 @@ Full substrate layout in §4.1.
 
 **FR-7 (canonical storage).** CSL-JSON is the canonical bibliographic store (per-reference frontmatter + aggregated `/.bib/refs.json`). **AC-7:** every reference note’s CSL-JSON validates and appears in refs.json.
 
-**FR-8 (rendering).** Rendered `chicago_note` and `chicago_bib` strings MUST be produced by a citeproc-based renderer using the `chicago-fullnote-bibliography` CSL style (Chicago notes-bibliography, 17th/18th ed.). **Implementation choice for Claude Code:** use Python `citeproc-py` with the `chicago-fullnote-bibliography.csl` style bundled under `scripts/csl/`; if unavailable, fall back to `pandoc --citeproc --csl chicago-fullnote-bibliography.csl`.  Bundle the CSL file so no network fetch is required at runtime. **AC-8:** lint_citations recomputes the two strings from CSL-JSON and hard-fails on mismatch/malformed output.
+**FR-8 (rendering).** Rendered `chicago_note` and `chicago_bib` strings MUST be produced by a citeproc-based renderer using the `chicago-fullnote-bibliography` CSL style (Chicago notes-bibliography, 17th/18th ed.). **Implementation choice for Claude Code:** use Python `citeproc-py` with the `chicago-fullnote-bibliography.csl` style bundled under `scripts/csl/`; if unavailable, fall back to `pandoc --citeproc --csl chicago-fullnote-bibliography.csl`. **[Amended A1: bundled as `chicago-notes-bibliography.csl`; pandoc is primary and citeproc-py the fallback.]**  Bundle the CSL file so no network fetch is required at runtime. **AC-8:** lint_citations recomputes the two strings from CSL-JSON and hard-fails on mismatch/malformed output.
 
 **FR-9 (scripture).** Scripture cited by book–chapter–verse per SBL Handbook of Style conventions and excluded from the bibliography. **AC-9:** scripture references carry a `source_tier: primary-text` and a `scripture: true` flag and are skipped by chicago_bib aggregation.
 
@@ -160,7 +217,7 @@ zettel-bootstrap/
 │   ├── init_content_repo.sh  maintenance_run.sh  new_worktree.sh
 │   ├── lint_citations.py  lint_links.py  build_manifest.py  verify_refs.py
 │   ├── fetch_remote.py  serendipity_sweep.py
-│   └── csl/chicago-fullnote-bibliography.csl
+│   └── csl/chicago-notes-bibliography.csl        # [A1] upstream rename
 ├── requirements.txt                # python deps
 ├── smoke_test.sh                   # end-to-end dry run (see §12)
 ├── .gitignore
@@ -229,7 +286,7 @@ All Python scripts MUST: read no secrets from the repo; accept `--help`; exit 0 
 1. Skill-smith retrospective (if its cadence is due) — §9.4.
 1. Lint gates (lint_citations, lint_links).
 1. Rebuild manifest.json + `.bib/refs.json`.
-1. Commit + push (push-rejection retry: re-pull, re-lint, retry).
+1. Commit + push (push-rejection retry: re-pull, re-lint, retry). **[Amended A3: the headless run commits; the wrapper re-lints and pushes.]**
 1. Update log.md and INBOX statuses; release `run.lock`.
    **AC-28:** steps are observable in log.md in order; a failed gate aborts before step 10.
 

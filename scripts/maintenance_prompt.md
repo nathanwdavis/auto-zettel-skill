@@ -1,0 +1,58 @@
+You are running an unattended zettel-bootstrap maintenance cycle on the content
+repository at {{REPO}}.
+
+Follow this cycle IN ORDER. After completing each step, append one line to
+log.md in the form `- <UTC timestamp> step <N>: <what happened>` so the run is
+auditable. Skip a step only when it has nothing to do, and log the skip.
+
+Step 2. Read INBOX.md and every open file under inquiries/. Entries marked
+`new` are your priorities; human feedback is authoritative and overrides
+everything else in this prompt's plan, including topic gaps.
+
+Step 3. Research and synthesize for the open inquiries and for gaps against the
+`topics` in config.yml. Delegate to the `orchestrator` agent to plan and run
+this; it will dispatch `researcher` and `synthesizer` agents in isolated
+worktrees ({{SCRIPTS}}/new_worktree.sh). Every new source must be captured into
+raw/ before its reference note exists.
+
+Step 4. Routine maintenance: delegate to the `note-maintainer` agent for the
+fleeting sweep, INBOX-driven revisions, and link repair.
+
+Step 5. Connector sweep — ONLY if config.yml `connector_cadence` is due (check
+log.md for the last `connector:` entry). If due, delegate to the `connector`
+agent; its proposals go to proposed-links/ and the critic reviews them:
+accepted links are written into BOTH notes, rejections are logged.
+
+Step 6. Delegate to the `critic` agent to gate every new or changed note:
+groundedness (flag < 0.80, block < 0.70), atomicity, clarity, link quality.
+A blocked note must not merge to the main branch — leave it in its worktree.
+
+Step 7. Skill-smith retrospective — ONLY if config.yml `skill_smith_cadence`
+is due (check log.md for the last `skill-smith:` entry). If due, delegate to
+the `skill-smith` agent: at most one proposal, only under skills/, recorded in
+skill-impact.md.
+
+Step 8. Run the lint gates yourself and fix what they find, re-running until
+clean or until nothing more can be fixed honestly:
+    python3 {{SCRIPTS}}/verify_refs.py --repo {{REPO}} {{VERIFY_ARGS}}
+    python3 {{SCRIPTS}}/lint_citations.py --repo {{REPO}}
+    python3 {{SCRIPTS}}/lint_links.py --repo {{REPO}}
+Never fix a lint by deleting knowledge, weakening a claim's sourcing, or
+marking something verified that is not.
+
+Step 9. Rebuild the machine-readable index:
+    python3 {{SCRIPTS}}/build_manifest.py --repo {{REPO}}
+
+Step 10. Update INBOX.md and inquiries/ statuses (answered inquiries carry
+result_notes backlinks to the permanent notes that answered them). Then commit
+everything on the main branch with one message summarizing the run.
+
+HARD RULES for this run:
+- You NEVER run `git push`. The wrapper that launched you re-verifies the
+  gates and pushes only if they pass. Committing is yours; pushing is not.
+- Append-only files stay append-only: log.md, skill-impact.md.
+- Never edit raw/ contents, this prompt, or anything outside {{REPO}}.
+- If you run low on turns or budget, stop starting new work and bring what is
+  already in progress to a clean committed-or-abandoned state; log where you
+  stopped. Committing completed work takes priority over starting anything new
+  once half the budget is spent.

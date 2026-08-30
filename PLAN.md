@@ -2,7 +2,7 @@
 
 **Source of truth:** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (all FR-x / AC-x / NFR-x / QA-x / checklist references below point there).
 **This repo:** the PRIVATE skill repo. It will contain ONLY the `zettel-bootstrap` plugin — never zettelkasten content. The content repo is created at genesis runtime by `init_content_repo.sh` and is out of scope for this repo's file tree.
-**Status:** plan committed; implementation not yet started.
+**Status:** Phases 1-2 complete. Phases 3-4 not started.
 
 ---
 
@@ -26,7 +26,7 @@ scripts/
   init_content_repo.sh maintenance_run.sh new_worktree.sh
   lint_citations.py lint_links.py build_manifest.py verify_refs.py
   fetch_remote.py serendipity_sweep.py
-  csl/chicago-fullnote-bibliography.csl
+  csl/chicago-notes-bibliography.csl
 tests/fixtures/                     # clean + planted-violation fixture notes (see §3)
 requirements.txt
 smoke_test.sh
@@ -51,7 +51,7 @@ Ship the genesis path first — smallest slice with standalone value, hardest ga
 2. **`scripts/init_content_repo.sh`** (FR-18): args `--name --visibility --owner --topics --cadence --budget --dir`; scaffolds the exact FR-1 tree from templates, writes config.yml, `git init` + initial commit, `gh repo create <owner>/<name> --<visibility> --source=. --remote=origin --push`, builds initial manifest. Fails safely (non-zero, no clobber) when the remote name already exists (AC-18).
 3. **`scripts/build_manifest.py`** (FR-3/FR-19): scans note frontmatter → `manifest.json` entries (`id,type,title,tags,links[{target_id,relation}],path,url_or_apipath,updated`). Deterministic and byte-idempotent (AC-3). Public content repo → full `raw.githubusercontent.com` URLs; private → repo-relative + GitHub API `contents` paths; never anonymous raw URLs for private (FR-topology).
 4. **`scripts/verify_refs.py`** (FR-10/FR-22): Crossref (always send `mailto` for the polite pool; back off on HTTP 429), arXiv API, PubMed, Open Library / Google Books; OR `/raw/` capture. Writes `verification` blocks; exits 0 even with unverified refs (lint is the gate); `--offline` uses captures only; network failure degrades to capture-only with a logged warning (NFR-5).
-5. **Citation rendering** (FR-8): `citeproc-py` with bundled `scripts/csl/chicago-fullnote-bibliography.csl` (no network at runtime); wired `pandoc --citeproc` fallback. **Threshold:** if citeproc-py can't render valid Chicago fullnote strings on the real fixtures, switch to the pandoc path as primary *before Phase 1 sign-off*. Scripture: SBL book–chapter–verse, `source_tier: primary-text`, `scripture: true`, excluded from bibliography (FR-9).
+5. **Citation rendering** (FR-8): **pandoc via bundled `pypandoc-binary` is the primary backend**, with `citeproc-py` wired as a fallback — the FR-8 threshold fired during Phase 1, because citeproc-py ignores the style's `initialize="false"` overrides and initializes given names (amendment A1). Style bundled at `scripts/csl/chicago-notes-bibliography.csl`, no network at runtime. Scripture: SBL book–chapter–verse, `source_tier: primary-text`, `scripture: true`, excluded from bibliography (FR-9).
 6. **`scripts/lint_citations.py`** (FR-11/FR-12/FR-20): hard non-zero fail on any unverified reference, malformed/mismatched Chicago strings (recomputed from CSL-JSON), permanent-note sourced claim without a verified-reference link, `contested` note with <3 distinct reference links. Output: `FILE\tRULE\tREASON` lines.
 7. **`scripts/lint_links.py`** (FR-21): typed-link taxonomy membership, `[[id]]` resolvability against manifest, INDEX→MOC→note layering, 1-1-1 rule, literature↔reference 1:1.
 8. **`skills/zettel-bootstrap/SKILL.md`** (FR-14): frontmatter restricted to the six portable spec fields (`name, description, license, compatibility, metadata, allowed-tools`); third-person description with explicit what+when trigger language, ≤1024 chars, no XML tags; body <500 lines / ≤5,000 tokens with progressive disclosure into `references/`. Author/validate with the **skill-creator** skill.
