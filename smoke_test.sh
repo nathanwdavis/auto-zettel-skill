@@ -8,6 +8,8 @@
 #   5. manifest builds, is idempotent, and honours the public/private matrix
 #   6. verification writes state; --offline verifies from raw/ captures
 #   8. the scaffolded repo ends lint-clean and committed
+#   8b. a stub-driven maintenance cycle runs end-to-end and pushes
+#   9. run.lock serialization: a second concurrent run aborts
 #
 # Exits 0 only if everything passes.
 
@@ -30,12 +32,14 @@ trap 'rm -rf "$WORK"' EXIT
 
 # --- 2. scripts respond to --help --------------------------------------------
 step "[2] script CLI contract"
-for s in build_manifest.py lint_citations.py lint_links.py verify_refs.py; do
+for s in build_manifest.py lint_citations.py lint_links.py verify_refs.py fetch_remote.py; do
   "$PY" "scripts/$s" --help >/dev/null 2>&1 || fail "scripts/$s --help"
   pass "scripts/$s --help"
 done
-bash scripts/init_content_repo.sh --help >/dev/null || fail "init_content_repo.sh --help"
-pass "scripts/init_content_repo.sh --help"
+for sh_script in init_content_repo.sh maintenance_run.sh new_worktree.sh; do
+  bash "scripts/$sh_script" --help >/dev/null || fail "$sh_script --help"
+  pass "scripts/$sh_script --help"
+done
 
 # --- 3. genesis ---------------------------------------------------------------
 step "[3] genesis scaffold"
@@ -70,6 +74,44 @@ pass "verify_refs.py --offline"
 pass "lint_citations.py exits 0 on a clean repo"
 "$PY" scripts/lint_links.py --repo "$KB" >/dev/null || fail "lint_links.py on clean repo"
 pass "lint_links.py exits 0 on a clean repo"
+
+# --- 8b + 9. maintenance cycle + lock serialization ---------------------------
+step "[8b,9] stub maintenance cycle and run.lock"
+MKB="$WORK/kb-maint"
+PATH="$(dirname "$PY"):$PATH" bash scripts/init_content_repo.sh \
+  --name kb-maint --visibility public --owner smoke-owner \
+  --topics "smoke topic" --dir "$MKB" --no-remote >/dev/null || fail "maintenance scaffold"
+ORIGIN="$WORK/origin.git"
+git init -q --bare -b main "$ORIGIN"
+git -C "$MKB" remote add origin "$ORIGIN"
+git -C "$MKB" branch -M main
+git -C "$MKB" push -q -u origin main
+BEFORE="$(git -C "$ORIGIN" rev-parse main)"
+
+STUB="$ROOT/tests/stub_claude/claude"
+export PYTHON="$PY" RESULTS_DIR="$WORK/runs"
+
+STUB_CLAUDE_MODE=good bash scripts/maintenance_run.sh --repo "$MKB" --claude-bin "$STUB" >/dev/null \
+  || fail "maintenance run (good)"
+[[ "$(git -C "$ORIGIN" rev-parse main)" != "$BEFORE" ]] || fail "good run did not push"
+grep -q "gates passed independently" "$MKB/log.md" || fail "gate step not logged"
+pass "stub maintenance cycle pushed; FR-28 steps visible in log.md (item 8)"
+
+AFTER_GOOD="$(git -C "$ORIGIN" rev-parse main)"
+STUB_CLAUDE_MODE=violate bash scripts/maintenance_run.sh --repo "$MKB" --claude-bin "$STUB" >/dev/null 2>&1 \
+  && fail "violating run should exit non-zero"
+[[ "$(git -C "$ORIGIN" rev-parse main)" == "$AFTER_GOOD" ]] || fail "violating run pushed"
+pass "lint violation blocked the push (A3)"
+
+# reset the repo for the lock test (the violating commit stays local otherwise)
+git -C "$MKB" reset -q --hard "$AFTER_GOOD"
+STUB_CLAUDE_MODE=slow bash scripts/maintenance_run.sh --repo "$MKB" --claude-bin "$STUB" >/dev/null &
+FIRST_PID=$!
+sleep 1
+SECOND_OUT="$(STUB_CLAUDE_MODE=slow bash scripts/maintenance_run.sh --repo "$MKB" --claude-bin "$STUB")"
+wait "$FIRST_PID" || fail "first concurrent run failed"
+echo "$SECOND_OUT" | grep -q "another run holds run.lock" || fail "second run did not abort on lock"
+pass "second concurrent run aborted on run.lock (item 9)"
 
 # --- 4. lints fail on violations ----------------------------------------------
 step "[4] planted violations are rejected"
