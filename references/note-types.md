@@ -69,6 +69,9 @@ The Chicago strings are generated — never hand-written. See
 A short-lived capture. Swept each cycle: promoted to a literature or permanent
 note, or cleared. Nothing downstream should depend on one.
 
+Create one with `scripts/capture.py --repo <repo> fleeting "..."` rather than by
+hand — a malformed file here fails the next run's manifest build.
+
 ### moc (structure)
 A map of content. `INDEX.md` links **only** to MOCs; MOCs link to notes. The
 layering keeps the root readable as the graph grows, and `lint_links.py`
@@ -89,3 +92,19 @@ ever be linked as a lump.
 `inquiries/<key>.md` moves `new → in-progress → answered → archived`. An
 inquiry marked `answered` must carry at least one `result_notes` backlink to
 the permanent note that answered it, resolvable in the manifest.
+
+An inquiry is **not a note**, which is why it is documented last and lives
+outside `NOTE_DIRS`. It has no `title` (its identity is its `question`), no
+typed links, and is never a link target; the 1-1-1 rule does not apply to it.
+The manifest indexes inquiries in their own top-level `inquiries` block so that
+nothing ever traverses a link into a question.
+
+Frontmatter: `id`, `key`, `slug`, `aliases`, `type: inquiry`, `question`,
+`status`, `priority` (`low|normal|high`), `asked_by`, `result_notes`, `created`,
+`updated`. Template: `templates/inquiry.md`. Create one with
+`scripts/capture.py --repo <repo> inquiry "..."`; list open ones with
+`scripts/inquiries.py`.
+
+`lint_links.py` enforces the schema — statuses, resolvability, and the rule that
+`result_notes` entries must be **permanent** notes. Full detail and rationale:
+`references/capture.md`.

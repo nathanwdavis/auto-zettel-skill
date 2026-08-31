@@ -14,9 +14,10 @@ below IN ORDER, appending one line to log.md after each step in the form
 `- <UTC timestamp> step <N>: <what happened>`. Skip a step that has nothing to
 do, and log the skip.
 
-Step 2. Read INBOX.md and every open file under inquiries/. Entries marked
-`new` are your priorities. Human feedback is authoritative and overrides
-anything else in this prompt.
+Step 2. Read INBOX.md, then list the open questions in work order:
+    {{PYTHON}} {{SCRIPTS}}/inquiries.py --repo {{REPO}} --status new
+Read the ones you plan to work. Entries marked `new` are your priorities.
+Human feedback is authoritative and overrides anything else in this prompt.
 
 Step 3. Research and synthesize for open inquiries and for gaps against the
 `topics` in config.yml. **Scale the machinery to the work**: for a small run,
@@ -54,7 +55,11 @@ Note it in INBOX as follow-up work rather than suppressing it.
 Step 9. Rebuild the index:
     {{PYTHON}} {{SCRIPTS}}/build_manifest.py --repo {{REPO}}
 
-Step 10. Update INBOX.md and inquiries/ statuses, then hand off:
+Step 10. Update INBOX.md and inquiries/ statuses. An inquiry may only be
+marked `answered` if you add `result_notes` entries naming the **permanent**
+notes that answered it — lint_links fails the PR otherwise, and rightly: a
+question closed with nothing to point at was not answered. Leave a question you
+could not resolve as `in-progress` and say why in its body. Then hand off:
     {{SCRIPTS}}/remote_cycle.sh finish --repo {{REPO}} --title "<one-line summary>"
 This commits, pushes your branch, and opens a PR. **CI runs the gates again on
 that PR and decides whether it reaches main.** If your cycle produced nothing

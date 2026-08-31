@@ -11,6 +11,7 @@
 #   8. the scaffolded repo ends lint-clean and committed
 #   8b. a stub-driven maintenance cycle runs end-to-end and pushes
 #   8c. the remote cycle: git-ref lock, run branch, no direct push to main
+#   8d. capture + ad-hoc research: human input the gates accept
 #   9. run.lock serialization: a second concurrent run aborts
 #
 # Exits 0 only if everything passes.
@@ -34,11 +35,12 @@ trap 'rm -rf "$WORK"' EXIT
 
 # --- 2. scripts respond to --help --------------------------------------------
 step "[2] script CLI contract"
-for s in build_manifest.py lint_citations.py lint_links.py verify_refs.py fetch_remote.py serendipity_sweep.py; do
+for s in build_manifest.py lint_citations.py lint_links.py verify_refs.py fetch_remote.py \
+         serendipity_sweep.py capture.py inquiries.py; do
   "$PY" "scripts/$s" --help >/dev/null 2>&1 || fail "scripts/$s --help"
   pass "scripts/$s --help"
 done
-for sh_script in init_content_repo.sh maintenance_run.sh new_worktree.sh; do
+for sh_script in init_content_repo.sh maintenance_run.sh new_worktree.sh adhoc_research.sh; do
   bash "scripts/$sh_script" --help >/dev/null || fail "$sh_script --help"
   pass "scripts/$sh_script --help"
 done
@@ -170,6 +172,68 @@ bash scripts/remote_cycle.sh finish --repo "$RKB" --title "smoke cycle" >/dev/nu
 [[ "$(git -C "$RORIGIN" rev-parse main)" == "$MAIN_BEFORE" ]] || fail "remote cycle pushed to main directly"
 git -C "$RORIGIN" branch | grep -q "$RBRANCH" || fail "run branch missing from origin"
 pass "work landed on the run branch; main untouched (CI decides)"
+
+# --- 8d. capture and ad-hoc research ------------------------------------------
+step "[8d] capture + ad-hoc research"
+
+# The gap this closes: plain markdown in fleeting/ fails the NEXT run's manifest
+# build, so the person who dropped it never sees the breakage.
+echo "just a thought" > "$KB/fleeting/hand-written.md"
+"$PY" scripts/build_manifest.py --repo "$KB" >/dev/null 2>&1 \
+  && fail "hand-written note should have failed the manifest build"
+rm "$KB/fleeting/hand-written.md"
+pass "hand-written markdown fails the manifest build (the motivating gap)"
+
+"$PY" scripts/capture.py --repo "$KB" fleeting "A captured thought" --tags smoke >/dev/null \
+  || fail "capture.py fleeting"
+"$PY" scripts/capture.py --repo "$KB" inquiry "Does capture hold the gates?" >/dev/null \
+  || fail "capture.py inquiry"
+"$PY" scripts/capture.py --repo "$KB" inbox "Smoke feedback" >/dev/null \
+  || fail "capture.py inbox"
+pass "captured a fleeting note, an inquiry, and an INBOX entry"
+
+for g in build_manifest.py lint_citations.py lint_links.py; do
+  "$PY" "scripts/$g" --repo "$KB" >/dev/null || fail "$g after capture"
+done
+pass "all gates still clean after capture"
+
+grep -q '"inquiries"' "$KB/manifest.json" || fail "inquiries not indexed in manifest"
+"$PY" scripts/inquiries.py --repo "$KB" --status new --json | grep -q "Does capture hold" \
+  || fail "inquiries.py did not report the new inquiry"
+pass "inquiry indexed in the manifest and reported by inquiries.py"
+
+# AC-6: answered with nothing to point at must fail the lint.
+INQ="$(ls "$KB"/inquiries/*.md | head -1)"
+sed -i.bak 's/^status: new/status: answered/' "$INQ" && rm -f "$INQ.bak"
+"$PY" scripts/lint_links.py --repo "$KB" >/dev/null 2>&1 \
+  && fail "answered inquiry with empty result_notes should fail the lint (AC-6)"
+sed -i.bak 's/^status: answered/status: new/' "$INQ" && rm -f "$INQ.bak"
+pass "AC-6 rejects an answered inquiry with no result_notes"
+
+# Ad-hoc research shares the lock with scheduled runs and never reaches main.
+AKB="$WORK/kb-adhoc"
+git clone -q "$RORIGIN" "$AKB"
+git -C "$AKB" remote set-head origin -a >/dev/null 2>&1 || true
+ABRANCH="$(ZETTEL_RUN_HOLDER=adhoc bash scripts/adhoc_research.sh \
+  --repo "$AKB" --question "What does an ad-hoc run land?" | sed -n 's/^branch: //p')" \
+  || fail "adhoc_research.sh"
+[[ -n "$ABRANCH" ]] || fail "adhoc_research.sh printed no branch"
+ls "$AKB"/inquiries/*.md >/dev/null 2>&1 || fail "adhoc did not file the inquiry"
+pass "ad-hoc run claimed the lock, filed the inquiry, opened $ABRANCH"
+
+ADHOC_BLOCKED="$(ZETTEL_RUN_HOLDER=adhoc-2 bash scripts/adhoc_research.sh \
+  --repo "$RKB" --question "Can I barge in?" 2>/dev/null; echo "rc=$?")"
+echo "$ADHOC_BLOCKED" | grep -q "rc=3" \
+  || fail "ad-hoc did not stand down while the lock was held (got: $ADHOC_BLOCKED)"
+pass "a second ad-hoc run stood down on the shared lock (exit 3)"
+
+MAIN_BEFORE="$(git -C "$RORIGIN" rev-parse main)"
+bash scripts/remote_cycle.sh finish --repo "$AKB" --title "smoke ad-hoc" >/dev/null \
+  || fail "ad-hoc finish"
+[[ "$(git -C "$RORIGIN" rev-parse main)" == "$MAIN_BEFORE" ]] \
+  || fail "ad-hoc research pushed to main directly"
+git -C "$RORIGIN" branch | grep -q "$ABRANCH" || fail "ad-hoc branch missing from origin"
+pass "the ad-hoc answer landed on a branch; main untouched"
 
 # --- 4. lints fail on violations ----------------------------------------------
 step "[4] planted violations are rejected"

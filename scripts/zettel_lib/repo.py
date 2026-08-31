@@ -11,7 +11,11 @@ import yaml
 from .frontmatter import Note
 
 NOTE_DIRS = ("fleeting", "literature", "permanent", "reference", "moc")
-SUBSTRATE_DIRS = NOTE_DIRS + ("inquiries", "raw", "skills", "proposed-links", ".bib")
+INQUIRY_DIR = "inquiries"
+SUBSTRATE_DIRS = NOTE_DIRS + (INQUIRY_DIR, "raw", "skills", "proposed-links", ".bib")
+
+#: FR-6 lifecycle. A run works `new` first and never touches `archived`.
+INQUIRY_STATUSES = ("new", "in-progress", "answered", "archived")
 
 
 class ContentRepoError(RuntimeError):
@@ -62,6 +66,16 @@ class ContentRepo:
 
     def notes(self, types: Iterable[str] | None = None) -> Iterator[Note]:
         for path in self.note_paths(types):
+            yield Note.load(path)
+
+    # -- inquiries (FR-6) ------------------------------------------------------
+    # Kept out of NOTE_DIRS deliberately: an inquiry is a question about the
+    # graph, not a node in it, so it carries no links and never satisfies 1-1-1.
+    def inquiry_paths(self) -> list[Path]:
+        return sorted((self.root / INQUIRY_DIR).glob("*.md"))
+
+    def inquiries(self) -> Iterator[Note]:
+        for path in self.inquiry_paths():
             yield Note.load(path)
 
     def rel(self, path: Path) -> str:

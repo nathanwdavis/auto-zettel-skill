@@ -4,10 +4,11 @@ A Claude Code plugin that scaffolds and perpetually grows a **citation-grounded
 Zettelkasten** knowledge repository on GitHub. Every sourced claim traces to a
 verified reference; notes that cannot be grounded fail a lint and never land.
 
-> **Status: Phase 3.5 of 4** — substrate, citation gates, the agent orchestra,
+> **Status: Phase 3.6 of 4** — substrate, citation gates, the agent orchestra,
 > scheduled maintenance (laptop cron *and* fully remote via Routines + CI
-> gating), two-mode access, and the serendipity sweep. Skill emergence
-> (Phase 4) remains. See [`PLAN.md`](PLAN.md).
+> gating), two-mode access, the serendipity sweep, and human capture with
+> tracked inquiries and ad-hoc research. Skill emergence (Phase 4) remains.
+> See [`PLAN.md`](PLAN.md).
 
 ## Two repositories
 
@@ -72,6 +73,39 @@ scripts/init_content_repo.sh \
 Add `--no-remote` to scaffold and commit locally without touching GitHub. The
 script refuses to clobber an existing repo or a non-empty directory.
 
+### Capture — getting a thought, question, or note into the repo
+
+```sh
+scripts/capture.py --repo <content-repo> fleeting "A thought" --tags networks
+scripts/capture.py --repo <content-repo> inquiry  "A question" --priority high
+scripts/capture.py --repo <content-repo> inbox    "Feedback for the next run"
+pbpaste | scripts/capture.py --repo <content-repo> fleeting "Clipped" --body -
+```
+
+Never hand-write a note file. The gates demand exact frontmatter, and a
+malformed file in `fleeting/` fails the manifest build for the *next scheduled
+run* — the person who dropped it never sees the breakage. `capture.py`
+generates artifacts that already pass every gate, and allocates note IDs around
+the ones already taken so two captures in the same minute cannot collide.
+
+An **inquiry** is an open question tracked across runs
+(`new → in-progress → answered → archived`). Runs work the `new` ones first;
+`scripts/inquiries.py --repo <content-repo> [--status new] [--json]` lists them.
+`lint_links.py` refuses to let an inquiry be marked `answered` without a
+`result_notes` backlink to the permanent note that answered it.
+
+### Ad-hoc research — answering a question now
+
+```sh
+scripts/adhoc_research.sh --repo <content-repo> --question "..." --priority high
+```
+
+Claims the same lock as a scheduled cycle, files the question as an inquiry,
+and opens a run branch. Research, then hand off with `remote_cycle.sh finish`:
+the answer reaches `main` only through the required check, exactly like
+scheduled work. Exit 3 means a scheduled run holds the lock — stand down, do
+not force it. Details: [`references/capture.md`](references/capture.md).
+
 ### Maintenance — scheduled, unattended growth
 
 ```sh
@@ -134,6 +168,7 @@ scripts/lint_links.py     --repo <content-repo>
 ```
 
 The lints exit non-zero and print `FILE⇥RULE⇥REASON` for each problem.
+`lint_links.py` also enforces the inquiry lifecycle (AC-6).
 `verify_refs.py --offline` verifies from `raw/` captures only when there is no
 network.
 
@@ -155,17 +190,26 @@ skills/zettel-bootstrap/     SKILL.md (entry point)
 references/                  architecture, note types, citation rules
 templates/                   note, config, and child-skill templates
 agents/                      the 8 subagent definitions
-scripts/                     genesis, maintenance, manifest, verification, lints
+scripts/                     genesis, capture, maintenance, manifest, verification, lints
   zettel_lib/                shared library (see note below)
   csl/                       bundled Chicago style + provenance
+ci/                          content-repo gate workflow + cloud env setup
 tests/                       pytest suite and cassettes
+.claude/CLAUDE.md            guidance for developing the skill itself
 docs/REQUIREMENTS.md         the specification, with amendments
+PLAN.md                      phase status and build order
 ```
 
 `scripts/zettel_lib/` is an addition to the layout the spec prescribes: the
-four Python scripts share frontmatter parsing, note naming, repo access, HTTP,
-and citation rendering, and duplicating those across four entry points would
-guarantee they drift.
+Python entry points share frontmatter parsing, note naming, repo access, HTTP,
+citation rendering, similarity scoring, and the git lock, and duplicating those
+across thirteen entry points would guarantee they drift.
+
+## Working on the skill itself
+
+[`.claude/CLAUDE.md`](.claude/CLAUDE.md) has the conventions, the environment's sharp edges,
+and the one invariant that governs every change: never make a gate pass by
+weakening it.
 
 ## Tests
 
@@ -174,7 +218,13 @@ pip install -r requirements-dev.txt
 ./smoke_test.sh
 ```
 
-`smoke_test.sh` runs the full pytest suite plus an end-to-end genesis scaffold.
+`smoke_test.sh` runs the full pytest suite (280 tests) plus an end-to-end
+genesis scaffold. To run pytest alone, use the virtualenv's interpreter —
+`pytest` is generally not installed in the system python:
+
+```sh
+.venv/bin/python -m pytest -q
+```
 
 Two acceptance checks cannot run in a sandboxed or offline environment and are
 **manual steps on a networked machine**:

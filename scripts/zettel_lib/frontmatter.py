@@ -100,3 +100,21 @@ class Note:
     @property
     def stem(self) -> str:
         return self.path.stem
+
+    # -- inquiry accessors (FR-6) ----------------------------------------------
+    @property
+    def question(self) -> str:
+        return str(self.meta.get("question", ""))
+
+    @property
+    def status(self) -> str:
+        return str(self.meta.get("status", ""))
+
+    @property
+    def priority(self) -> str:
+        return str(self.meta.get("priority", ""))
+
+    @property
+    def result_notes(self) -> list[str]:
+        """Note keys that answered this inquiry."""
+        return [str(r) for r in (self.meta.get("result_notes") or [])]

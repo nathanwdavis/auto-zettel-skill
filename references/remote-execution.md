@@ -106,3 +106,26 @@ Exit 3 from `remote_cycle.sh start` means another run holds the lock. That is
 the designed outcome for overlapping schedules, not an error — the session logs
 it and ends. If a container dies mid-cycle, its lock is broken by the next run
 once past the TTL, so a crash costs one cycle rather than wedging the schedule.
+
+## Ad-hoc runs share the lock
+
+A scheduled cycle is not the only thing that claims the lock.
+`scripts/adhoc_research.sh` — "answer this question now" — calls the same
+`remote_cycle.sh start`, so an ad-hoc session and a scheduled firing can never
+both be writing to the content repo.
+
+The contention is real in both directions, and both are handled the same way:
+
+- **Ad-hoc arrives while a cycle is running** → exit 3, stand down, say so.
+  Nothing is left behind: the inquiry is only written *after* the lock is held.
+- **A Routine fires while an ad-hoc session is researching** → the scheduled
+  session exits 3 and ends. It costs one cycle, which is the right price.
+
+Neither steals a live lock. An ad-hoc session that researches for twenty
+minutes is doing exactly what the lock protects, and a scheduled run that
+barged in would duplicate the work and then race it into a conflicting branch.
+Only a provably stale lock (past `STALE_LOCK_HOURS`) is ever broken.
+
+Ad-hoc work hands off through `remote_cycle.sh finish` like any cycle: a run
+branch, a PR, and the required check. There is no ad-hoc path to `main`.
+See `references/capture.md`.

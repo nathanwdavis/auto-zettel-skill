@@ -4,7 +4,9 @@
 Enforces the FR-5 relation taxonomy, resolvability of every [[key]] and typed
 link, the INDEX -> MOC -> note layering (FR-4), and the 1-1-1 rule (FR-4).
 Also enforces the note-key naming amendment: a file's stem must equal its
-frontmatter `key`, and that key must decompose into its own `slug` and `id`.
+frontmatter `key`, and that key must decompose into its own `slug` and `id`;
+and the FR-6 inquiry lifecycle (AC-6), where an `answered` question must point
+at the permanent notes that answered it.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from zettel_lib import naming
 from zettel_lib.cli import EXIT_USAGE, Violation, base_parser, open_repo, report
 from zettel_lib.frontmatter import FrontmatterError, Note
-from zettel_lib.repo import ContentRepo, ContentRepoError
+from zettel_lib.repo import INQUIRY_STATUSES, ContentRepo, ContentRepoError
 
 RELATIONS = {
     "supports", "contradicts", "analogous", "shared-concept",
@@ -116,8 +118,64 @@ def lint(repo: ContentRepo) -> list[Violation]:
                     rel, "one-to-one",
                     f"literature note links to {len(refs)} reference notes; exactly 1 required"))
 
+        # -- duplicate ids -----------------------------------------------------
+        # id_to_key is many-to-one, so a collision here would be invisible: the
+        # loser's bare-ID links would quietly point at the winner.
+        if note.id and note.key and id_to_key.get(note.id) != note.key:
+            violations.append(Violation(
+                rel, "duplicate-id",
+                f"note id '{note.id}' is also held by '{id_to_key[note.id]}'"))
+
     violations.extend(lint_layering(repo, keys, id_to_key, by_key))
+    violations.extend(lint_inquiries(repo, keys, id_to_key, by_key))
     return violations
+
+
+def lint_inquiries(repo, keys, id_to_key, by_key) -> list[Violation]:
+    """The FR-6 lifecycle (AC-6).
+
+    The load-bearing rule is the last one: `answered` with an empty
+    `result_notes` is a question marked done with nothing to show for it, which
+    is how a knowledge base quietly stops answering anything.
+    """
+    out: list[Violation] = []
+    for path in repo.inquiry_paths():
+        rel = repo.rel(path)
+        try:
+            inquiry = Note.load(path)
+        except FrontmatterError as exc:
+            out.append(Violation(rel, "frontmatter", str(exc)))
+            continue
+
+        if inquiry.stem != inquiry.key:
+            out.append(Violation(
+                rel, "filename-key-mismatch",
+                f"filename stem '{inquiry.stem}' != frontmatter key '{inquiry.key}'"))
+        if not inquiry.question.strip():
+            out.append(Violation(rel, "missing-question",
+                                 "inquiry frontmatter has no 'question'"))
+        if inquiry.status not in INQUIRY_STATUSES:
+            out.append(Violation(
+                rel, "bad-status",
+                f"status '{inquiry.status}' is outside {'|'.join(INQUIRY_STATUSES)}"))
+
+        for target in inquiry.result_notes:
+            resolved = resolve(target, keys, id_to_key)
+            if not resolved:
+                out.append(Violation(
+                    rel, "unresolved-result-note",
+                    f"result_notes entry '{target}' is absent from the manifest"))
+            elif by_key[resolved].type != "permanent":
+                out.append(Violation(
+                    rel, "result-note-type",
+                    f"result_notes entry '{target}' is a "
+                    f"'{by_key[resolved].type}' note; only permanent notes answer"))
+
+        if inquiry.status == "answered" and not inquiry.result_notes:
+            out.append(Violation(
+                rel, "unanswered-answer",
+                "status is 'answered' but result_notes is empty (AC-6)"))
+    return out
 
 
 def lint_layering(repo, keys, id_to_key, by_key) -> list[Violation]:
