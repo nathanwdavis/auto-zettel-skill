@@ -68,6 +68,34 @@ That split matters: a verifier that failed the run would create pressure to
 mark things verified to get past it. Recording "I could not verify this"
 honestly, and failing separately, keeps the record truthful.
 
+When a reference carries **both** a capture and an authoritative identifier
+and the network is up, both are checked: a registry hit upgrades the method
+to `raw-capture+crossref` (or `+arxiv`, `+pubmed`, `+openlibrary`,
+`+googlebooks`), and a definitive miss keeps the capture-based verification —
+the documented either/or — while recording `identifier_check: failed` and
+printing a warning, so a rotted or mistyped DOI is visible instead of
+silently un-exercised.
+
+### What the timestamps mean
+
+- **`updated`** (note frontmatter) tracks **authored edits** — a human or
+  agent changed the note's content.
+- **`verification.date`** tracks the machine-check state: it is stamped when
+  the verification *state* changes and left alone by a re-check that found
+  the same state. `verify_refs.py` writes a note only when its verification
+  state or rendered Chicago strings actually changed, so a quiet cycle
+  produces no diff on untouched reference notes.
+
+### Raw captures
+
+A capture file's name is `<ref-id>-<slug>.<ext>` and its content is the
+verbatim fetched source. If a header records when the fetch happened, use
+full ISO-8601 UTC instants — a window as `<instant> to <instant>`, e.g.
+`2026-08-31T11:18:00Z to 2026-08-31T11:19:00Z` — never a compressed form
+like `11:18Z-11:19Z`. And a capture is never rewritten after the fact, an
+awkward header included: captures are immutable evidence, and the sandbox
+gate rejects any edit to `raw/`.
+
 ### Crossref politeness
 
 Requests always send `mailto`, which routes them to Crossref's reserved polite

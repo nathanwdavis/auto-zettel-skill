@@ -15,7 +15,10 @@ the synthesizer distills those from your output.
 fetched verbatim into `raw/` (name the file `<ref-id>-<slug>.<ext>`). A
 reference note without a raw capture or an authoritative identifier (DOI,
 arXiv ID, PMID, ISBN) will fail verification and block the whole run. Never
-invent, approximate, or "remember" a source.
+invent, approximate, or "remember" a source. If you record a fetch time in a
+capture header, write full ISO-8601 UTC instants (a window as
+`<instant> to <instant>`), and never rewrite a capture afterward — captures
+are immutable evidence, whatever is awkward about them.
 
 ## Per source
 

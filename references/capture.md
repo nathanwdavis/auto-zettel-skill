@@ -59,6 +59,14 @@ required check, which is exactly the thing the check is for.
 Hand-editing an inquiry's `status` or `result_notes` is also fine. Hand-creating
 a note file is not — use `capture.py`.
 
+One directory is off-limits to *everyone*, always: **`raw/` is immutable**.
+A capture is evidence — the verbatim source a citation was verified against —
+and rewriting one after it has been cited is a worse precedent than any
+defect in it (a malformed header, an awkward filename). Fix the tooling or
+guidance that produced the defect, add a fresh capture if a better one is
+needed, and leave the original alone. The sandbox gate
+(`check_skill_sandbox.py`) rejects edits and deletions under `raw/` outright.
+
 ## The inquiry lifecycle (FR-6)
 
 An inquiry is an open question, tracked across runs. It lives in `inquiries/`,
