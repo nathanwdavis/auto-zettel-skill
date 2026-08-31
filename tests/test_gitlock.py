@@ -148,16 +148,34 @@ def test_push_denial_error_carries_the_remote_message(push_denied):
 
 # --- payload ------------------------------------------------------------------
 
-def test_lock_blob_is_valid_json_with_the_expected_fields(two_containers):
+def test_lock_file_is_valid_json_with_the_expected_fields(two_containers):
     a, _ = two_containers
     gitlock.claim(a, "run-A", "sess-1")
-    sha = subprocess.run(["git", "-C", str(a), "ls-remote", "origin", gitlock.LOCK_REF],
+    tip = subprocess.run(["git", "-C", str(a), "ls-remote", "origin",
+                          f"refs/heads/{gitlock.LOCK_BRANCH}"],
                          capture_output=True, text=True, check=True).stdout.split()[0]
-    subprocess.run(["git", "-C", str(a), "fetch", "-q", "origin", gitlock.LOCK_REF], check=True)
-    blob = subprocess.run(["git", "-C", str(a), "cat-file", "-p", sha],
+    subprocess.run(["git", "-C", str(a), "fetch", "-q", "origin", gitlock.LOCK_BRANCH],
+                   check=True)
+    blob = subprocess.run(["git", "-C", str(a), "show", f"{tip}:{gitlock.LOCK_FILE}"],
                           capture_output=True, text=True, check=True).stdout
     data = json.loads(blob)
     assert set(data) == {"holder", "session", "acquired_at"}
+
+
+def test_only_branch_pushes_are_ever_used(two_containers):
+    """The managed git proxy denies custom refs and deletions (found live), so
+    the whole lifecycle must survive on fast-forward branch pushes alone."""
+    a, b = two_containers
+    gitlock.claim(a, "run-A")
+    gitlock.release(a)
+    gitlock.claim(b, "run-B")
+    gitlock.break_stale(b, ttl_hours=0)
+    refs = subprocess.run(["git", "-C", str(a), "ls-remote", "origin"],
+                          capture_output=True, text=True, check=True).stdout
+    for line in refs.splitlines():
+        ref = line.split()[1]
+        assert ref.startswith("refs/heads/") or ref == "HEAD", \
+            f"non-branch ref created: {ref}"
 
 
 def test_lock_does_not_disturb_the_branch(two_containers):

@@ -1,14 +1,17 @@
-"""Distributed run lock held in the content repo's git remote.
+"""Distributed run lock held on a branch of the content repo's remote.
 
 A filesystem lock cannot serialize scheduled remote sessions: each firing gets a
 fresh container, so neither run can see the other's lock file. This lock lives
-in the remote instead, and the mutual exclusion comes from git itself -- pushing
-a ref that already exists is rejected non-fast-forward, and only one racer's
-push can win.
+in the remote instead, and the mutual exclusion comes from git itself: two
+racers both try to advance the lock branch, and the remote accepts exactly one
+(the loser gets a non-fast-forward rejection).
 
-The lock ref holds a small JSON blob (holder, session, ISO timestamp) so a
-blocked run can report *who* holds it, and so a lock left behind by a crashed
-container can be broken once it is provably stale.
+Why a branch and not a custom ref: managed remote sessions push through a git
+proxy that only permits fast-forward pushes to ordinary branches -- custom
+namespaces like ``refs/zettel/*`` and ref DELETIONS are denied (found live).
+So the lock is a file, ``LOCK.json``, on the branch ``zettel/lock``: claiming
+commits the file, releasing commits its removal, and the branch just accrues a
+tiny claim/release history that nobody needs to read.
 """
 
 from __future__ import annotations
@@ -19,8 +22,12 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-LOCK_REF = "refs/zettel/run-lock"
+LOCK_BRANCH = "zettel/lock"
+LOCK_FILE = "LOCK.json"
 DEFAULT_TTL_HOURS = 6
+
+# git's well-known empty tree: what the lock branch holds when released.
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
 @dataclass(frozen=True)
@@ -42,9 +49,10 @@ class GitLockError(RuntimeError):
     pass
 
 
-def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+def _git(repo: Path, *args: str, check: bool = True,
+         stdin: str | None = None) -> subprocess.CompletedProcess:
     result = subprocess.run(["git", "-C", str(repo), *args],
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, input=stdin)
     if check and result.returncode != 0:
         raise GitLockError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
     return result
@@ -54,17 +62,19 @@ def _now() -> str:
     return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def read(repo: Path, remote: str = "origin") -> LockInfo | None:
-    """Return the current lock holder, or None when the lock is free."""
-    listing = _git(repo, "ls-remote", remote, LOCK_REF, check=False)
+def _remote_tip(repo: Path, remote: str) -> str | None:
+    listing = _git(repo, "ls-remote", remote, f"refs/heads/{LOCK_BRANCH}", check=False)
     if listing.returncode != 0 or not listing.stdout.strip():
         return None
-    sha = listing.stdout.split()[0]
-    # Fetch the object so it can be read; a blob is tiny.
-    _git(repo, "fetch", "-q", remote, LOCK_REF, check=False)
-    blob = _git(repo, "cat-file", "-p", sha, check=False)
+    return listing.stdout.split()[0]
+
+
+def _info_at(repo: Path, commit: str, remote: str) -> LockInfo | None:
+    """LockInfo from LOCK.json at ``commit``, or None when released/absent."""
+    _git(repo, "fetch", "-q", remote, LOCK_BRANCH, check=False)
+    blob = _git(repo, "show", f"{commit}:{LOCK_FILE}", check=False)
     if blob.returncode != 0:
-        return LockInfo("unknown", "unknown", "")
+        return None  # no LOCK.json at this commit: the lock is released
     try:
         data = json.loads(blob.stdout)
     except json.JSONDecodeError:
@@ -74,40 +84,72 @@ def read(repo: Path, remote: str = "origin") -> LockInfo | None:
                     str(data.get("acquired_at", "")))
 
 
+def _push_state(repo: Path, remote: str, parent: str | None, holder_info: dict | None,
+                message: str) -> subprocess.CompletedProcess:
+    """Commit a new lock-branch state (file present or absent) and push it."""
+    if holder_info is None:
+        tree = EMPTY_TREE
+    else:
+        payload = json.dumps(holder_info, sort_keys=True)
+        blob = _git(repo, "hash-object", "-w", "--stdin", stdin=payload).stdout.strip()
+        tree = _git(repo, "mktree",
+                    stdin=f"100644 blob {blob}\t{LOCK_FILE}\n").stdout.strip()
+    args = ["commit-tree", tree, "-m", message]
+    if parent:
+        args = ["commit-tree", tree, "-p", parent, "-m", message]
+    commit = _git(repo, "-c", "user.name=zettel-lock",
+                  "-c", "user.email=noreply@localhost", *args).stdout.strip()
+    return _git(repo, "push", remote, f"{commit}:refs/heads/{LOCK_BRANCH}", check=False)
+
+
+def read(repo: Path, remote: str = "origin") -> LockInfo | None:
+    """Return the current lock holder, or None when the lock is free."""
+    tip = _remote_tip(repo, remote)
+    if tip is None:
+        return None
+    return _info_at(repo, tip, remote)
+
+
 def claim(repo: Path, holder: str, session: str = "",
           remote: str = "origin") -> tuple[bool, LockInfo | None]:
     """Try to take the lock. Returns ``(acquired, current_holder_if_blocked)``.
 
-    Atomicity is git's: the push creates the ref only if it does not exist, and
-    a concurrent racer's identical attempt is rejected by the remote.
+    Atomicity is git's: both racers push a child of the same tip, the remote
+    fast-forwards exactly one, and the loser's push is rejected.
     """
-    payload = json.dumps({"holder": holder, "session": session,
-                          "acquired_at": _now()}, sort_keys=True)
-    result = subprocess.run(["git", "-C", str(repo), "hash-object", "-w", "--stdin"],
-                            input=payload, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise GitLockError(f"could not write lock blob: {result.stderr.strip()}")
-    sha = result.stdout.strip()
+    tip = _remote_tip(repo, remote)
+    if tip is not None:
+        current = _info_at(repo, tip, remote)
+        if current is not None:
+            return False, current
 
-    push = _git(repo, "push", remote, f"{sha}:{LOCK_REF}", check=False)
+    push = _push_state(repo, remote, tip,
+                       {"holder": holder, "session": session, "acquired_at": _now()},
+                       f"lock: claim by {holder}")
     if push.returncode == 0:
         return True, None
-    holder = read(repo, remote)
-    if holder is None:
-        # The push failed but no lock exists: this is not contention, it is a
-        # real failure (most likely no push credential for the remote). Found
-        # live: a session without the repo in its authorized set got a proxy
-        # 403 here, and returning (False, None) crashed the caller instead of
-        # reporting the actual problem.
-        raise GitLockError(
-            "lock push rejected but no lock exists on the remote -- "
-            f"push access failure, not contention: {push.stderr.strip()[:400]}")
-    return False, holder
+
+    # Rejected: either we lost a race (a fresh claim now sits on the branch)
+    # or the push itself is impossible (no credential, proxy denial). Found
+    # live: reporting the latter as contention hid the real problem.
+    current = read(repo, remote)
+    if current is not None:
+        return False, current
+    raise GitLockError(
+        "lock push rejected but no lock exists on the remote -- "
+        f"push access failure, not contention: {push.stderr.strip()[:400]}")
 
 
 def release(repo: Path, remote: str = "origin") -> None:
-    """Delete the lock ref. Safe to call when the lock is already gone."""
-    _git(repo, "push", remote, "--delete", LOCK_REF, check=False)
+    """Commit the lock file's removal. Safe when the lock is already free."""
+    for _attempt in range(2):  # one retry: release races are benign
+        tip = _remote_tip(repo, remote)
+        if tip is None or _info_at(repo, tip, remote) is None:
+            return
+        push = _push_state(repo, remote, tip, None, "lock: release")
+        if push.returncode == 0:
+            return
+    raise GitLockError("could not release the lock after retry")
 
 
 def break_stale(repo: Path, ttl_hours: float = DEFAULT_TTL_HOURS,

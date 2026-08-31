@@ -30,13 +30,29 @@ Routine (cron schedule)
 | Reaches main via | wrapper pushes after re-lint | auto-merge on green CI |
 | Cost ceiling | `--max-budget-usd` | cadence, prompt scope, model tier |
 
-**The lock had to change.** Each Routine firing gets a fresh container, so a
-lock file on disk is invisible to every other run. The replacement lives in the
-remote: `gitlock.claim()` pushes a blob to `refs/zettel/run-lock`, and git's own
-ref-update rules provide the mutual exclusion — a second racer's push is
-rejected non-fast-forward. A run that finds a live lock exits 3 and stands down;
-only a provably stale lock (older than the TTL, default 6h) is broken, because
-stealing a live one means two sessions research the same inquiry and bill twice.
+**The lock had to change — twice.** Each Routine firing gets a fresh container,
+so a lock file on disk is invisible to every other run. The replacement lives in
+the remote — and the first design (a blob at `refs/zettel/run-lock`) died on
+contact with reality: the managed git proxy only permits fast-forward pushes to
+ordinary **branches**, denying custom ref namespaces and all ref deletions.
+
+So the lock is a file, `LOCK.json`, on the branch `zettel/lock`. Claiming
+commits the file; releasing commits its removal; the branch just accrues a tiny
+claim/release history. Mutual exclusion is still git's own: two racers push a
+child of the same tip and the remote fast-forwards exactly one. A run that
+finds a live lock exits 3 and stands down; only a provably stale lock (older
+than the TTL, default 6h) is broken, because stealing a live one means two
+sessions research the same inquiry and bill twice.
+
+Two proxy constraints to plan around, both found by live runs:
+- **Push credentials exist only for a session's source repos.** A fresh-session
+  Routine has none, so its pushes 403. Spawn maintenance sessions with the
+  content repo as `source_url` — in practice, create the production Routine
+  from the claude.ai Routines UI, where the repo (and connectors) bind to the
+  schedule.
+- **Sessions cannot delete remote branches.** Enable *Settings → General →
+  "Automatically delete head branches"* on the content repo so merged run
+  branches are cleaned up server-side.
 
 **Gate enforcement got stronger, not weaker.** The old guarantee was a shell
 script that re-ran the lints — enforcement the agent shared a filesystem with.
