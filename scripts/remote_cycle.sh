@@ -29,12 +29,14 @@ REPO=""; TTL="${STALE_LOCK_HOURS:-6}"; TITLE=""
 
 usage() {
   cat <<'USAGE'
-Usage: remote_cycle.sh <start|finish|abort|status> --repo <content-repo> [options]
+Usage: remote_cycle.sh <start|finish|abort|status|refresh-skill> --repo <content-repo> [options]
 
   start   --repo <path> [--ttl <hours>]   claim lock, pull, create run branch
   finish  --repo <path> [--title <text>]  commit, push branch, open PR, auto-merge
   abort   --repo <path>                   release the lock, keep the branch
   status  --repo <path>                   report lock holder and branch
+  refresh-skill                           fast-forward this skill checkout itself
+                                          (run BEFORE start; takes no --repo)
 
 Exit codes: 0 ok; 3 lock held by a live run (not an error -- stand down); 1 failure.
 USAGE
@@ -53,6 +55,40 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$CMD" == "help" ]]; then usage; exit 0; fi
+
+if [[ "$CMD" == "refresh-skill" ]]; then
+  # Fast-forward the checkout this script lives in, so a scheduled run picks
+  # up fixes without waiting for the environment cache to be rebuilt (issue
+  # #7: the cached install was found 12 commits stale, silently). ff-only is
+  # the safety property that makes auto-refresh acceptable: it structurally
+  # cannot damage a dirty or diverged developer checkout -- it just declines.
+  # Always exit 0: refresh is advisory, and a cycle on current-but-older code
+  # beats no cycle at all.
+  SKILL_ROOT_LOCAL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  REV() { git -C "$SKILL_ROOT_LOCAL" rev-parse --short HEAD 2>/dev/null || echo unknown; }
+  BEFORE="$(REV)"
+  SKILL_BRANCH="$(git -C "$SKILL_ROOT_LOCAL" branch --show-current 2>/dev/null || true)"
+  if [[ -z "$SKILL_BRANCH" ]]; then
+    echo "skill checkout at $BEFORE is detached or not a git repo; not refreshing"
+    exit 0
+  fi
+  if ! git -C "$SKILL_ROOT_LOCAL" fetch -q origin "$SKILL_BRANCH" 2>/dev/null; then
+    echo "warning: could not fetch skill origin; staying at $BEFORE" >&2
+    exit 0
+  fi
+  if git -C "$SKILL_ROOT_LOCAL" merge --ff-only -q FETCH_HEAD >/dev/null 2>&1; then
+    AFTER="$(REV)"
+    if [[ "$BEFORE" == "$AFTER" ]]; then
+      echo "skill already current at $AFTER ($SKILL_BRANCH)"
+    else
+      echo "skill refreshed: $BEFORE -> $AFTER ($SKILL_BRANCH)"
+    fi
+  else
+    echo "warning: skill checkout at $BEFORE cannot fast-forward (dirty or diverged); staying put" >&2
+  fi
+  exit 0
+fi
+
 [[ -n "$REPO" ]] || { usage >&2; die "--repo is required"; }
 [[ -d "$REPO/.git" ]] || die "not a git repository: $REPO"
 REPO="$(cd "$REPO" && pwd)"

@@ -296,6 +296,79 @@ def test_every_step_is_logged_with_the_skill_revision(content_repo):
     assert committed == log
 
 
+# --- refresh-skill (issue #7, finding 7) --------------------------------------
+
+def _fake_skill_install(tmp_path):
+    """A throwaway 'skill repo' containing the real script, plus its clone.
+
+    refresh-skill updates the checkout the SCRIPT lives in, so exercising it
+    against the real dev repo would fetch from GitHub and race real branches.
+    """
+    src = tmp_path / "skill-src"
+    (src / "scripts").mkdir(parents=True)
+    (src / "scripts" / "remote_cycle.sh").write_bytes(SCRIPT.read_bytes())
+    (src / "scripts" / "remote_cycle.sh").chmod(0o755)
+    git = ["git", "-C", str(src)]
+    subprocess.run(git + ["init", "-q", "-b", "main"], check=True)
+    for key, value in (("user.name", "t"), ("user.email", "t@localhost")):
+        subprocess.run(git + ["config", key, value], check=True)
+    subprocess.run(git + ["add", "-A"], check=True)
+    subprocess.run(git + ["commit", "-qm", "v1"], check=True)
+    install = tmp_path / "skill-install"
+    subprocess.run(["git", "clone", "-q", str(src), str(install)], check=True)
+    return src, install
+
+
+def _advance(src, name, text):
+    (src / name).write_text(text, encoding="utf-8")
+    subprocess.run(["git", "-C", str(src), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(src), "commit", "-qm", f"add {name}"], check=True)
+
+
+def _head(repo):
+    return subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_refresh_skill_fast_forwards_a_clean_install(tmp_path):
+    src, install = _fake_skill_install(tmp_path)
+    _advance(src, "new-fix.txt", "a fix that must reach scheduled runs\n")
+
+    result = subprocess.run([str(install / "scripts" / "remote_cycle.sh"),
+                             "refresh-skill"], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert "skill refreshed:" in result.stdout
+    assert _head(install) == _head(src)
+    assert (install / "new-fix.txt").exists()
+
+
+def test_refresh_skill_declines_a_diverged_install_harmlessly(tmp_path):
+    """ff-only is the safety property: a dev checkout is declined, never damaged."""
+    src, install = _fake_skill_install(tmp_path)
+    (install / "local-work.txt").write_text("uncommitted dev work\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(install), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(install), "-c", "user.name=t",
+                    "-c", "user.email=t@localhost", "commit", "-qm", "local"], check=True)
+    local_head = _head(install)
+    _advance(src, "upstream.txt", "upstream moved on\n")
+
+    result = subprocess.run([str(install / "scripts" / "remote_cycle.sh"),
+                             "refresh-skill"], capture_output=True, text=True)
+    assert result.returncode == 0, "refresh is advisory; it must never fail a cycle"
+    assert "cannot fast-forward" in result.stderr
+    assert _head(install) == local_head
+    assert (install / "local-work.txt").read_text(encoding="utf-8") \
+        == "uncommitted dev work\n"
+
+
+def test_refresh_skill_is_a_noop_when_current(tmp_path):
+    _, install = _fake_skill_install(tmp_path)
+    result = subprocess.run([str(install / "scripts" / "remote_cycle.sh"),
+                             "refresh-skill"], capture_output=True, text=True)
+    assert result.returncode == 0
+    assert "already current" in result.stdout
+
+
 def test_help_and_bad_subcommand(content_repo):
     repo, _ = content_repo
     assert subprocess.run([str(SCRIPT), "--help"], capture_output=True,

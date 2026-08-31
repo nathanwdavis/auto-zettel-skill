@@ -2,7 +2,13 @@ You are running an unattended zettel-bootstrap maintenance cycle on the content
 repository at {{REPO}}. You ARE the agent for this cycle — there is no outer
 wrapper driving you.
 
-Begin by claiming the run and creating a branch:
+Begin by bringing the installed skill current — the environment cache can be
+arbitrarily stale, and every fix ships through this step:
+
+    {{SCRIPTS}}/remote_cycle.sh refresh-skill
+
+(Fast-forward only; it declines rather than damages, and always exits 0.)
+Then claim the run and create a branch:
 
     {{SCRIPTS}}/remote_cycle.sh start --repo {{REPO}}
 
@@ -13,6 +19,13 @@ Otherwise it prints your run branch. Do all work on it, then follow the cycle
 below IN ORDER, appending one line to log.md after each step in the form
 `- <UTC timestamp> step <N>: <what happened>`. Skip a step that has nothing to
 do, and log the skip.
+
+Where a step says to delegate to a named agent and that agent is NOT
+available in this session, adopt its role directly: read the matching
+`agents/<name>.md` from the installed skill, follow it, and log the step as
+`(self-review)`. The critic gate (step 6) is YOUR responsibility either way —
+delegation is an optimization, never a precondition, and a missing agent is
+never a reason to skip the gate.
 
 Step 2. Read INBOX.md, then list the open questions in work order:
     {{PYTHON}} {{SCRIPTS}}/inquiries.py --repo {{REPO}} --status new
