@@ -90,6 +90,36 @@ no laptop involved. In that mode, three mechanisms change shape:
 
 The laptop path (FR-25/FR-32 as written) remains fully supported.
 
+### A6 — Human capture and ad-hoc research (2026-08-31, FR-6, §7)
+
+The spec describes every input as machine-authored, and the gates were built on
+that assumption: `build_manifest.py` raises on a note without exact
+frontmatter. That made casual human capture -- what a zettelkasten actually
+lives on -- the riskiest act in the system, since a hand-written file in
+`fleeting/` fails the *next scheduled run's* manifest build rather than the
+author's own.
+
+Three additions close it without loosening any gate:
+
+- **`scripts/capture.py`** is the supported authoring path for humans and for
+  ad-hoc sessions: it generates fleeting notes, inquiries, and INBOX entries
+  that already satisfy every gate. Because note IDs are minute-resolution and
+  the manifest's `id_to_key` map is many-to-one, it also allocates around IDs
+  already in use; `lint_links.py` gains a `duplicate-id` rule to cover notes it
+  did not write. (Two notes sharing an ID previously made bare-ID links resolve
+  to whichever was indexed last, silently.)
+- **FR-6 is implemented as specified.** `templates/inquiry.md` fixes the
+  schema, `build_manifest.py` indexes inquiries in a top-level `inquiries`
+  block, `scripts/inquiries.py` reports open questions, and `lint_links.py`
+  enforces AC-6 -- an `answered` inquiry must carry at least one `result_notes`
+  entry resolving to a **permanent** note. Inquiries sit outside `NOTE_DIRS`:
+  a question is not a node in the graph and is never a link target.
+- **`scripts/adhoc_research.sh`** gives "answer this now" the same guarantees
+  as a scheduled cycle -- same lock (standing down on exit 3 rather than
+  stealing a live one), same run branch, same required-check handoff. There is
+  deliberately no ad-hoc path to `main`, because a fast path to `main` is a
+  path around the citation gates.
+
 -----
 
 ## TL;DR

@@ -5,7 +5,8 @@ Follow this cycle IN ORDER. After completing each step, append one line to
 log.md in the form `- <UTC timestamp> step <N>: <what happened>` so the run is
 auditable. Skip a step only when it has nothing to do, and log the skip.
 
-Step 2. Read INBOX.md and every open file under inquiries/. Entries marked
+Step 2. Read INBOX.md, then `inquiries.py --repo <repo> --status new` for the
+open questions in work order, and read the ones you plan to work. Entries marked
 `new` are your priorities; human feedback is authoritative and overrides
 everything else in this prompt's plan, including topic gaps.
 
@@ -47,9 +48,11 @@ marking something verified that is not.
 Step 9. Rebuild the machine-readable index:
     {{PYTHON}} {{SCRIPTS}}/build_manifest.py --repo {{REPO}}
 
-Step 10. Update INBOX.md and inquiries/ statuses (answered inquiries carry
-result_notes backlinks to the permanent notes that answered them). Then commit
-everything on the main branch with one message summarizing the run.
+Step 10. Update INBOX.md and inquiries/ statuses. An inquiry may only be
+marked `answered` with `result_notes` naming the **permanent** notes that
+answered it — lint_links fails otherwise. Leave an unresolved question as
+`in-progress` and say why. Then commit everything on the main branch with one
+message summarizing the run.
 
 HARD RULES for this run:
 - You NEVER run `git push`. The wrapper that launched you re-verifies the

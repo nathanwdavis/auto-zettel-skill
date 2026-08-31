@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch
 metadata:
   version: 0.1.0
-  phase: "1 (substrate + citation gates)"
+  phase: "3.6 (capture, inquiries, ad-hoc research)"
 ---
 
 # Zettel Bootstrap
@@ -15,7 +15,8 @@ traces to a verified reference**. Unverifiable notes fail a lint and never land.
 
 Two repositories, never mixed:
 
-- **Skill repo** (this one, private) — the plugin. Never contains notes.
+- **Skill repo** (this one) — the plugin. Never contains notes, and never any
+  secret: it is safe to make public.
 - **Content repo** — created at genesis by `scripts/init_content_repo.sh`.
   Holds all knowledge. Public or private, chosen at genesis.
 
@@ -24,7 +25,9 @@ Two repositories, never mixed:
 | Situation | Go to |
 |---|---|
 | No content repo exists yet | [Genesis](#genesis) |
-| Content repo exists, user asks a question or wants growth | [Adding knowledge](#adding-knowledge) |
+| User asks a question and wants it researched now | [Answering a question now](#answering-a-question-now) |
+| Content repo exists, user wants growth | [Adding knowledge](#adding-knowledge) |
+| User wants to jot a thought or file a question for later | [Capturing input](#capturing-input) |
 | Scheduled/unattended growth | [Maintenance runs](#maintenance-runs) |
 | No local clone (claude.ai, API) | [Remote access](#remote-access-mode-b) |
 | Before any commit to the content repo | [The gates](#the-gates) |
@@ -50,10 +53,64 @@ first knowledge pass: capture at least one source per topic into `raw/`, write
 its reference and literature notes, distil one permanent note, build `INDEX.md`
 and one MOC, run [the gates](#the-gates), and commit.
 
+## Capturing input
+
+Never hand-write a note file. The gates demand exact frontmatter, and a
+malformed file in `fleeting/` fails the manifest build for the *next* scheduled
+run, not for whoever wrote it. Use the capture tool:
+
+```sh
+scripts/capture.py --repo <repo> fleeting "A thought" --tags networks
+scripts/capture.py --repo <repo> inquiry  "A question to research" --priority high
+scripts/capture.py --repo <repo> inbox    "Feedback for the next run"
+pbpaste | scripts/capture.py --repo <repo> fleeting "Clipped" --body -
+```
+
+It generates a well-formed artifact — key, id, frontmatter, timestamps — that
+passes every gate as written. Editing `INBOX.md` by hand is also fine; it is
+prose, not frontmatter.
+
+An **inquiry** is an open question, tracked across runs (`new` → `in-progress`
+→ `answered` → `archived`). A run works the `new` ones first. List them with
+`scripts/inquiries.py --repo <repo> [--status new] [--json]`.
+
+`answered` requires at least one `result_notes` entry pointing at a permanent
+note — the lint enforces it. Closing a question with nothing to point at is how
+a knowledge base quietly stops answering anything.
+
+## Answering a question now
+
+Ad-hoc research uses the same lock, branch, and gate as a scheduled run. There
+is no fast path to `main`, because a fast path to `main` is a path around the
+citation gates.
+
+```sh
+scripts/adhoc_research.sh --repo <repo> --question "..." [--priority high]
+```
+
+That claims the lock, files the question as an inquiry, and creates the run
+branch. **Exit code 3 means a scheduled run holds the lock: stand down and say
+so. Never force it** — two sessions researching the same question pay twice.
+
+Then research it, following [Adding knowledge](#adding-knowledge). Two things
+to get right:
+
+- **Answer in chat.** The user asked a question; give them the answer, with the
+  sources you verified.
+- **File what is worth keeping.** If the answer rests on sources worth citing
+  again, write the notes. If it does not, do not pad the base with them.
+- **Always file the inquiry**, either way, so the question is not lost. Set
+  `status` and, when notes were written, `result_notes`.
+
+Hand off with `scripts/remote_cycle.sh finish --repo <repo> --title "..."`.
+**An ad-hoc session never pushes to `main` and never merges.** The required
+check decides. See `references/capture.md`.
+
 ## Adding knowledge
 
 Read `INBOX.md` **first** — human feedback there is authoritative and overrides
-any automated decision.
+any automated decision. Then `scripts/inquiries.py --repo <repo> --status new`:
+open questions are work the user has already asked for.
 
 For each source:
 
@@ -178,6 +235,7 @@ Read these only when the task calls for them:
 | `references/scheduling.md` | cron/desktop scheduling, budgets, run guarantees |
 | `references/serendipity.md` | the sweep: candidate selection, backends, thresholds |
 | `references/remote-execution.md` | scheduled remote sessions, git lock, CI gating |
+| `references/capture.md` | the three input routes, inquiry lifecycle, ad-hoc research |
 
 ## Rules that do not bend
 
