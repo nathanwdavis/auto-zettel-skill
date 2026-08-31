@@ -37,7 +37,7 @@ trap 'rm -rf "$WORK"' EXIT
 step "[2] script CLI contract"
 for s in build_manifest.py lint_citations.py lint_links.py verify_refs.py fetch_remote.py \
          serendipity_sweep.py capture.py inquiries.py lint_skills.py \
-         check_skill_sandbox.py skill_review.py; do
+         check_skill_sandbox.py skill_review.py skill_trial.py; do
   "$PY" "scripts/$s" --help >/dev/null 2>&1 || fail "scripts/$s --help"
   pass "scripts/$s --help"
 done
@@ -251,6 +251,13 @@ NOTE_HASH() { find "$1" \( -path '*/permanent/*' -o -path '*/literature/*' \
   -o -path '*/reference/*' -o -path '*/moc/*' \) -name '*.md' \
   -exec sha256sum {} + | sort | sha256sum; }
 
+# an inquiry for the auto-trial to answer, committed so preflight stays clean
+"$PY" scripts/capture.py --repo "$SKB" inquiry "Does the smoke trial fire?" >/dev/null \
+  || fail "capture inquiry for trial"
+git -C "$SKB" add -A && git -C "$SKB" -c user.name=smoke -c user.email=s@localhost \
+  commit -q -m "smoke: trial inquiry"
+
+BEFORE_NOTES_TRIAL="$(NOTE_HASH "$SKB")"
 STUB_CLAUDE_MODE=smith bash scripts/maintenance_run.sh --repo "$SKB" --claude-bin "$STUB" >/dev/null \
   || fail "smith maintenance run"
 git -C "$SORIGIN" ls-tree -r --name-only main | grep -q "skills/demo-skill/SKILL.md" \
@@ -258,6 +265,13 @@ git -C "$SORIGIN" ls-tree -r --name-only main | grep -q "skills/demo-skill/SKILL
 grep -q "proposed" "$SKB/skill-impact.md" || fail "proposal not recorded in skill-impact.md"
 "$PY" scripts/lint_skills.py --repo "$SKB" >/dev/null || fail "lint_skills after proposal"
 pass "smith cycle proposed skills/demo-skill and recorded it (FR-35)"
+
+# the wrapper auto-ran the A/B trial: scores recorded, notes untouched (FR-36)
+grep -q "skill_trial: demo-skill with=" "$SKB/log.md" || fail "trial scores not logged"
+grep -q "| trial |" "$SKB/skill-impact.md" || fail "trial record missing from skill-impact.md"
+ls "$WORK/runs"/trial-demo-skill-*.json >/dev/null 2>&1 || fail "trial scores JSON not written"
+[[ "$(NOTE_HASH "$SKB")" == "$BEFORE_NOTES_TRIAL" ]] || fail "the trial modified knowledge notes"
+pass "A/B trial auto-ran with the proposal; scores await the human gate (FR-36)"
 
 SKB_MAIN="$(git -C "$SORIGIN" rev-parse main)"
 # gate PASS lines land in log.md after the run's commit; drop them so the

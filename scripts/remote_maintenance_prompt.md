@@ -19,8 +19,11 @@ Step 2. Read INBOX.md, then list the open questions in work order:
 Read the ones you plan to work. Entries marked `new` are your priorities.
 Human feedback is authoritative and overrides anything else in this prompt.
 
-Step 3. Research and synthesize for open inquiries and for gaps against the
-`topics` in config.yml. **Scale the machinery to the work**: for a small run,
+Step 3. First list the child skills the knowledge base has grown:
+    {{PYTHON}} {{SCRIPTS}}/skill_review.py --repo {{REPO}} list
+and Read the SKILL.md of each `approved` skill relevant to the planned work —
+they are house procedure. Then research and synthesize for open inquiries and
+for gaps against the `topics` in config.yml. **Scale the machinery to the work**: for a small run,
 do it directly yourself; subagent dispatch and worktrees cost turns that small
 runs cannot justify. For substantial research, delegate to the `orchestrator`
 agent. Every new source must be captured into raw/ before its reference note
@@ -48,7 +51,10 @@ skill-impact.md. Then verify the smith's diff stayed in its sandbox:
     {{PYTHON}} {{SCRIPTS}}/check_skill_sandbox.py --repo {{REPO}} --base <noted commit> --strict
 If that exits non-zero, restore the offending paths
 (`git checkout <noted commit> -- <path>`), log the violation, and continue
-the cycle without the proposal.
+the cycle without the proposal. If the check passes and a proposal was
+recorded, run the A/B trial now so its scores are already waiting for the
+human decision (FR-36; cheap-tier, 3 calls per question):
+    {{PYTHON}} {{SCRIPTS}}/skill_trial.py --repo {{REPO}} --skill <name>
 
 Step 8. Run the gates yourself and fix what they find, re-running until clean
 or until nothing more can be fixed honestly:

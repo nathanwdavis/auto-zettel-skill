@@ -113,9 +113,16 @@ def test_budget_cutoff_blocks_the_push_and_mirrors_exit_code(repo_with_origin):
 
 # --- FR-37 sandbox (checklist 10, AC-37) --------------------------------------
 
-def test_smith_proposal_cycle_passes_the_gates_and_pushes(repo_with_origin):
+def test_smith_proposal_cycle_trials_scores_and_pushes(repo_with_origin):
     repo, origin = repo_with_origin
     before = origin_head(origin)
+    # an inquiry for the auto-trial to run against, committed so preflight passes
+    subprocess.run([sys.executable, str(PLUGIN_ROOT / "scripts" / "capture.py"),
+                    "--repo", str(repo), "inquiry", "Does the trial fire?"],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c",
+                    "user.email=t@localhost", "commit", "-qm", "inquiry"], check=True)
 
     result = run_maintenance(repo, mode="smith")
     assert result.returncode == 0, result.stdout + result.stderr
@@ -128,7 +135,16 @@ def test_smith_proposal_cycle_passes_the_gates_and_pushes(repo_with_origin):
     assert "skills/demo-skill/PURPOSE.md" in pushed
     impact_md = (repo / "skill-impact.md").read_text(encoding="utf-8")
     assert "proposed" in impact_md and "demo-skill" in impact_md
-    assert "skill-smith: proposed demo-skill" in (repo / "log.md").read_text(encoding="utf-8")
+    log = (repo / "log.md").read_text(encoding="utf-8")
+    assert "skill-smith: proposed demo-skill" in log
+    # the wrapper auto-ran the A/B trial and committed its scores (FR-36)
+    assert "step 7b A/B trial" in log
+    assert "skill_trial: demo-skill with=" in log
+    assert "| trial |" in impact_md
+    pushed_log = subprocess.run(
+        ["git", "-C", str(origin), "log", "--format=%s", "main"],
+        capture_output=True, text=True, check=True).stdout
+    assert "Record A/B trial scores for demo-skill" in pushed_log
 
 
 def test_plugin_repo_write_is_blocked_and_logged(repo_with_origin):

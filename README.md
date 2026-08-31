@@ -4,11 +4,12 @@ A Claude Code plugin that scaffolds and perpetually grows a **citation-grounded
 Zettelkasten** knowledge repository on GitHub. Every sourced claim traces to a
 verified reference; notes that cannot be grounded fail a lint and never land.
 
-> **Status: Phase 3.6 of 4** — substrate, citation gates, the agent orchestra,
-> scheduled maintenance (laptop cron *and* fully remote via Routines + CI
-> gating), two-mode access, the serendipity sweep, and human capture with
-> tracked inquiries and ad-hoc research. Skill emergence (Phase 4) remains.
-> See [`PLAN.md`](PLAN.md).
+> **Status: all 4 phases shipped** — substrate, citation gates, the agent
+> orchestra, scheduled maintenance (laptop cron *and* fully remote via
+> Routines + CI gating), two-mode access, the serendipity sweep, human capture
+> with tracked inquiries and ad-hoc research, and skill emergence: the base
+> proposes its own child skills, A/B-trials them on its own questions, and a
+> human decides. See [`PLAN.md`](PLAN.md).
 
 ## Two repositories
 
@@ -139,6 +140,27 @@ look, not a link. The connector agent reads both notes and justifies or
 discards each one; the critic writes accepted links into both notes. Details:
 [`references/serendipity.md`](references/serendipity.md).
 
+### Skill emergence — the base grows its own procedures
+
+On `skill_smith_cadence` (monthly by default) a maintenance cycle's
+skill-smith may propose **one** child skill into the content repo's
+`skills/<name>/` — never into this repo; that rail is enforced in code, not
+prose. An A/B trial then answers the repo's own open inquiries with and
+without the candidate (read-only, cheap-tier) and records the scores in
+`skill-impact.md`. Promotion is always yours:
+
+```sh
+scripts/skill_review.py --repo <content-repo> list
+scripts/skill_review.py --repo <content-repo> promote --skill <name> --reason "..."
+scripts/skill_review.py --repo <content-repo> reject  --skill <name> --reason "..."
+```
+
+Rejection reverts only the skill layer — knowledge notes are never touched —
+and is permanent history: a rejected create is never proposed again. Approved
+skills are read by later runs as house procedure. The full design, including
+what `lint_skills.py` and `check_skill_sandbox.py` enforce and where:
+[`references/skill-emergence.md`](references/skill-emergence.md).
+
 ### Fully remote scheduled runs (no laptop)
 
 A Routine fires a fresh remote session on a cloud environment whose setup
@@ -165,6 +187,7 @@ scripts/verify_refs.py    --repo <content-repo> --mailto you@example.org
 scripts/build_manifest.py --repo <content-repo>
 scripts/lint_citations.py --repo <content-repo>
 scripts/lint_links.py     --repo <content-repo>
+scripts/lint_skills.py    --repo <content-repo>
 ```
 
 The lints exit non-zero and print `FILE⇥RULE⇥REASON` for each problem.
@@ -218,7 +241,7 @@ pip install -r requirements-dev.txt
 ./smoke_test.sh
 ```
 
-`smoke_test.sh` runs the full pytest suite (280 tests) plus an end-to-end
+`smoke_test.sh` runs the full pytest suite (320 tests) plus an end-to-end
 genesis scaffold. To run pytest alone, use the virtualenv's interpreter —
 `pytest` is generally not installed in the system python:
 

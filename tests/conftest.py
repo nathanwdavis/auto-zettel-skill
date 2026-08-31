@@ -54,6 +54,7 @@ CONFIG = {
     "models": {"strong": "claude-opus-5", "cheap": "claude-haiku-4-5-20251001"},
     "connector_cadence": "weekly",
     "skill_smith_cadence": "monthly",
+    "trial_questions": 3,
 }
 
 

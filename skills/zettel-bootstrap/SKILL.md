@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch
 metadata:
   version: 0.1.0
-  phase: "3.6 (capture, inquiries, ad-hoc research)"
+  phase: "4 (skill emergence)"
 ---
 
 # Zettel Bootstrap
@@ -29,6 +29,7 @@ Two repositories, never mixed:
 | Content repo exists, user wants growth | [Adding knowledge](#adding-knowledge) |
 | User wants to jot a thought or file a question for later | [Capturing input](#capturing-input) |
 | Scheduled/unattended growth | [Maintenance runs](#maintenance-runs) |
+| A child-skill proposal awaits a decision | [Growing child skills](#growing-child-skills) |
 | No local clone (claude.ai, API) | [Remote access](#remote-access-mode-b) |
 | Before any commit to the content repo | [The gates](#the-gates) |
 | User asks how a piece works | `references/` (below) |
@@ -204,6 +205,39 @@ hold up, delete the rest. The critic writes accepted links into both notes.
 Runs on `connector_cadence`, not every cycle. See
 `references/serendipity.md`.
 
+## Growing child skills
+
+The knowledge base grows its own procedures. On `skill_smith_cadence`
+(monthly by default) a maintenance run's skill-smith reads the manifest,
+`skill-impact.md`, and recent run traces, and may propose **at most one**
+child skill per cycle into the content repo's `skills/<name>/` — exactly
+`SKILL.md` + `PURPOSE.md`, recorded with its diff via:
+
+```sh
+scripts/skill_review.py --repo <repo> propose --skill <name> --kind <create|patch> --motivation "..."
+```
+
+An A/B trial then answers the repo's own inquiry questions with and without
+the candidate (read-only, cheap-tier; `trial_questions` per arm) and records
+groundedness + citation-coverage means in `skill-impact.md`. The scheduled
+paths run it automatically; by hand it is
+`scripts/skill_trial.py --repo <repo> --skill <name>`.
+
+**Promotion is a human act — always** (FR-36):
+
+```sh
+scripts/skill_review.py --repo <repo> list
+scripts/skill_review.py --repo <repo> promote --skill <name> --reason "..." [--scores <trial.json>]
+scripts/skill_review.py --repo <repo> reject  --skill <name> --reason "..."
+```
+
+Rejection reverts `skills/<name>/` to its last approved state (removal, for a
+rejected create) and records the outcome permanently; knowledge notes are
+never touched, and a rejected create's name is never proposed again. Runs
+read `approved` skills as house procedure. The sandbox around all of this —
+what a smith may write, and what `lint_skills.py` / `check_skill_sandbox.py`
+enforce — is in `references/skill-emergence.md`.
+
 ## Remote access (Mode B)
 
 With no local clone (claude.ai, the API), read the content repo remotely.
@@ -236,6 +270,8 @@ Read these only when the task calls for them:
 | `references/serendipity.md` | the sweep: candidate selection, backends, thresholds |
 | `references/remote-execution.md` | scheduled remote sessions, git lock, CI gating |
 | `references/capture.md` | the three input routes, inquiry lifecycle, ad-hoc research |
+| `references/skill-emergence.md` | child skills: the three layers, proposer rails, trial, promotion |
+| `references/quality-gates.md` | every gate and threshold, where each binds, the never-weaken rule |
 
 ## Rules that do not bend
 

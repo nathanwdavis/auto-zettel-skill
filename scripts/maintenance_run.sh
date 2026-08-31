@@ -173,6 +173,26 @@ if [[ $CLAUDE_EXIT -ne 0 ]]; then
 fi
 log "maintenance_run: headless run complete (result: $RESULT_JSON)"
 
+# --- step 7b: A/B trial when the cycle proposed a skill (FR-36) ---------------
+# The wrapper, not the session, runs the trial: it needs fresh read-only
+# claude calls, and nesting them inside the headless run would cost turns and
+# an allowlist hole. A failed trial does not fail the run — the proposal
+# stands recorded and a human can run skill_trial.py by hand; only the human
+# gate decides promotion either way.
+NEW_PROPOSAL="$(git -C "$REPO" diff "$PRE_HEAD" -- skill-impact.md 2>/dev/null \
+  | awk -F'|' '/^\+\|/ { gsub(/ /,"",$5); if ($5=="proposed") { gsub(/ /,"",$4); print $4 } }' | head -1)"
+if [[ -n "$NEW_PROPOSAL" ]]; then
+  log "maintenance_run: step 7b A/B trial for proposal $NEW_PROPOSAL"
+  if PYTHONPATH="$SCRIPT_DIR" "$PYBIN" "$SCRIPT_DIR/skill_trial.py" --repo "$REPO" \
+       --skill "$NEW_PROPOSAL" --claude-bin "$CLAUDE_BIN" >> "$RUN_LOG" 2>&1; then
+    git -C "$REPO" add skill-impact.md log.md
+    git -C "$REPO" -c user.name="zettel-bootstrap" -c user.email="noreply@localhost" \
+      commit -q -m "Record A/B trial scores for $NEW_PROPOSAL"
+  else
+    log "maintenance_run: skill_trial FAILED for $NEW_PROPOSAL; proposal stands, run it manually"
+  fi
+fi
+
 # --- independent gates (amendment A3; NFR-3) ----------------------------------
 GATES_OK=1
 for gate in "build_manifest.py --check" "lint_citations.py" "lint_links.py" \

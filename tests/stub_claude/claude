@@ -24,6 +24,32 @@ for ((i=0; i<${#args[@]}; i++)); do
   if [[ "${args[$i]}" == "--allowedTools" ]]; then ALLOWED="${args[$((i+1))]}"; fi
 done
 
+# --- skill_trial.py calls: read-only answer/judge sessions --------------------
+# These arrive with --allowedTools "Read,Glob,Grep" and no "repository at"
+# line in the prompt, so they must be handled before the maintenance-run
+# assertions below. The with-arm is detectable by the candidate skill's
+# presence in the working copy; its canned answer cites a real manifest key
+# so citation coverage separates the arms deterministically.
+if [[ "$PROMPT" == *"answering one question from a zettelkasten"* ]]; then
+  KEY="$(grep -o '"key": "[^"]*"' manifest.json 2>/dev/null | head -1 | cut -d'"' -f4 || true)"
+  if ls skills/*/SKILL.md >/dev/null 2>&1; then
+    printf '{"result":"Following the house procedure: grounded in [[%s]]."}\n' "$KEY"
+  else
+    printf '{"result":"An unsourced answer citing [[no-such-note--000000000000]]."}\n'
+  fi
+  exit 0
+fi
+if [[ "$PROMPT" == *"judging two answers"* ]]; then
+  A_PART="${PROMPT#*=== Answer A ===}"
+  A_PART="${A_PART%%=== Answer B ===*}"
+  if [[ "$A_PART" == *"house procedure"* ]]; then
+    echo '{"result":"{\"a\": 0.9, \"b\": 0.7}"}'
+  else
+    echo '{"result":"{\"a\": 0.7, \"b\": 0.9}"}'
+  fi
+  exit 0
+fi
+
 # Regression check for the word-splitting bug that shattered the allowlist:
 # the whole list must arrive as ONE argument still containing the space-y
 # git patterns, or a real run gets its commits denied.

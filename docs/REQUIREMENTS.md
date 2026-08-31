@@ -120,6 +120,44 @@ Three additions close it without loosening any gate:
   deliberately no ad-hoc path to `main`, because a fast path to `main` is a
   path around the citation gates.
 
+### A7 — Skill emergence, as implementable (2026-08-31, FR-36, FR-37, AC-36, AC-37)
+
+Phase 4 forced five refinements of §9.4; the requirements' intent is
+unchanged, but each needed a mechanical shape the prose does not fix:
+
+- **skill-impact.md append-only is semantic, not byte-prefix.** The genesis
+  scaffold puts the summary table above the detail sections, so a new row
+  lands mid-file. The enforceable invariant is "every existing record
+  survives byte-identical; only additions are allowed", checked by
+  `zettel_lib/impact.py` and gated by `check_skill_sandbox.py`
+  (`log.md` remains byte-prefix append-only).
+- **The FR-36 unified diff is captured at proposal time**, by
+  `skill_review.py propose` as the smith's final act, when the diff against
+  the cycle base is cheap and unambiguous. Reconstructing it at decision
+  time would be neither.
+- **"Not re-proposed" is mechanical at name level, for creates.** A rejected
+  create's name is permanently banned (`re-proposed-skill` lint rule). A
+  rejected *patch* is permanent history the smith must read (FR-34), but a
+  later different patch to the same skill stays legal — otherwise one bad
+  tweak freezes a skill forever. Recurrence in patches is the human
+  reviewer's call.
+- **AC-37 enforcement is layered by diff granularity.** A `claude` session's
+  writes cannot be intercepted in-process, so: the Mode-A wrapper snapshots
+  the plugin tree around the headless run (any change aborts, unpushed); the
+  cycle-wide diff gate enforces the append-only/raw invariants in the
+  wrapper and in CI; and a `--strict` check on the smith's isolated diff
+  confines it to `skills/` plus the two ledgers before its work merges. At
+  whole-cycle granularity a smith note-edit is indistinguishable from
+  note-maintainer work — the strict smith-scoped check is where that rail
+  actually binds, with critic/lints/PR review as residual backstop.
+- **The A/B trial auto-runs in the proposing cycle** (owner's direction:
+  the human gate must not also be a scheduling bottleneck), with cost pinned:
+  at most one trial per proposal cycle, `trial_questions` (default 3)
+  questions × 3 cheap-tier read-only calls — two answer arms in throwaway
+  tree copies (the without-copy simply lacks the candidate) plus ONE paired
+  judge call, order-randomized. Promotion itself remains a human act; FR-36
+  is unchanged. Remote budget caps remain as A5 states.
+
 -----
 
 ## TL;DR

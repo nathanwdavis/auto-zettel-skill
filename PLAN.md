@@ -1,9 +1,9 @@
 # Build Plan — `zettel-bootstrap` Claude Code Skill
 
-**Source of truth:** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (all FR-x / AC-x / NFR-x / QA-x / checklist references below point there). Deviations forced by implementation are recorded there as numbered amendments — **A1–A6** so far.
+**Source of truth:** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (all FR-x / AC-x / NFR-x / QA-x / checklist references below point there). Deviations forced by implementation are recorded there as numbered amendments — **A1–A7** so far.
 **Working on this repo:** [`.claude/CLAUDE.md`](.claude/CLAUDE.md) — how to run the suite, the environment's sharp edges, and the conventions.
 **This repo:** the skill repo. It contains ONLY the `zettel-bootstrap` plugin — never zettelkasten content. The content repo is created at genesis runtime by `init_content_repo.sh` and is out of scope for this repo's file tree. Both repos are public (A4); nothing here may contain a secret (NFR-4).
-**Status:** Phases 1, 2, 3, 3.5, and 3.6 complete (3.6 on PR #5). Phase 4 not started.
+**Status:** All phases complete — 1, 2, 3, 3.5, 3.6 (PR #5), and 4. Every §12 checklist item passes.
 
 ---
 
@@ -20,8 +20,7 @@ agents/                             # 8 subagent definitions (.md + YAML frontma
 references/                         # progressive-disclosure detail docs
   architecture.md note-types.md citation-rules.md orchestra.md
   two-mode-access.md scheduling.md serendipity.md remote-execution.md
-  capture.md
-  # Phase 4 will add: skill-emergence.md quality-gates.md
+  capture.md skill-emergence.md quality-gates.md
 templates/                          # content-repo scaffolding sources
   fleeting.md literature.md permanent.md reference.md moc.md inquiry.md
   inbox-entry.md config.yml PURPOSE.md child-SKILL.md
@@ -34,10 +33,12 @@ scripts/
   maintenance_prompt.md remote_maintenance_prompt.md
   new_worktree.sh fetch_remote.py
   build_manifest.py verify_refs.py lint_citations.py lint_links.py
+  lint_skills.py check_skill_sandbox.py   # Phase 4 gates
+  skill_review.py skill_trial.py          # Phase 4: propose/promote/reject + A/B trial
   serendipity_sweep.py
   zettel_lib/                       # shared library -- see the README note
     naming.py frontmatter.py repo.py cli.py http.py
-    citations.py similarity.py agents.py gitlock.py
+    citations.py similarity.py agents.py gitlock.py impact.py sandbox.py
   csl/chicago-notes-bibliography.csl
 ci/
   content-repo-gates.yml            # installed IN the content repo as a required check
@@ -123,22 +124,51 @@ Every input path assumed a machine authored it. Dropping plain markdown into `fl
 3. **`scripts/adhoc_research.sh`** — same lock, same run branch, same required-check handoff as a scheduled cycle. Exit 3 propagates unchanged: a live lock is never stolen. The question is filed *before* any research, so an interrupted session still leaves it behind. There is deliberately no ad-hoc path to `main`.
 4. **A latent bug the tests surfaced**: note IDs are minute-resolution and the manifest's `id_to_key` map is many-to-one, so two notes minted in the same minute collided and a bare-ID link resolved to whichever was indexed last — silently. `capture.py` allocates around IDs in use; `build_manifest.py` raises and `lint_links.py` reports `duplicate-id` for notes it did not write.
 
-**Still open**: the live sandbox check — capture an inquiry, let the next scheduled Routine pick it up, confirm it lands `answered` with a `result_notes` backlink. It is the only end-to-end test of the human → scheduled-run handoff against a real cycle. Worth running before Phase 4.
+**Still open**: the live handoff check — capture an inquiry, let the next scheduled Routine pick it up, confirm it lands `answered` with a `result_notes` backlink. It is the only end-to-end test of the human → scheduled-run handoff against a real cycle (everything else is stub-proven). Still worth running now that Phase 4 is in; a skill-smith-due cycle doubles as the live test of the proposal path.
 
-### Phase 4 — Skill emergence (WikiSkill-adapted)  ⬜ not started
-*Exit gate: checklist item 10.*
+### Phase 4 — Skill emergence (WikiSkill-adapted)  ✅ shipped
+*Amendment A7. Exit gate: checklist item 10.*
 
-1. **Skill-smith agent** + **`references/skill-emergence.md`** / **`quality-gates.md`**: three-layer separation inside the content repo (FR-33) — `/raw/` + traces immutable; note graph + `log.md` + `skill-impact.md` never rolled back; `/skills/<name>/{SKILL.md,PURPOSE.md}` gated and rollbackable.
-2. Proposer inputs (FR-34): manifest/INDEX + `skill-impact.md` + ≥4 recent run traces before proposing; PURPOSE.md carries Origin / Patterns-Addressed / Evolution-History.
-3. Atomic proposals (FR-35): exactly one create-or-patch per cycle; prefer patching an existing skill.
-4. Open-world gating (FR-36): A/B trial on inbox questions (groundedness / citation-coverage / critic scores), **human approval required**; rejection reverts the skill layer only and appends metadata + unified diff + scores + outcome to `skill-impact.md`; rejected proposals are not re-proposed; knowledge layer untouched.
-5. Safety rails (FR-37): Skill-smith can never write to this skill repo; writes outside content-repo `/skills/` are blocked and logged; per-run budget caps enforced.
+Built sandbox-first, per the CLAUDE.md rail: the enforcement existed and was
+tested before the proposer could run against it.
+
+1. **The sandbox became code** (FR-37/AC-37, previously prose-only). Layered by
+   what each diff can actually see: `maintenance_run.sh` snapshots the plugin
+   tree around the headless run and aborts unpushed on any change (the AC-37
+   red line); `check_skill_sandbox.py --base <pre-run HEAD>` enforces log.md
+   byte-prefix append-only, `skill-impact.md` *semantic* append-only, and
+   `raw/` immutability in both the wrapper and CI; `--strict` confines the
+   smith's isolated diff to `skills/` + the two ledgers before it merges.
+   `lint_skills.py` gates skill-layer wellformedness (two-file units, cited
+   PURPOSE, no re-proposed rejected creates) as a fourth lint everywhere.
+2. **`zettel_lib/impact.py`** is the single parser/writer for
+   `skill-impact.md`: summary-table row + `##` detail section (kind,
+   motivation/reason, scores, fenced unified diff) per event, append-only by
+   construction — reconciling the genesis 5-column table with FR-36's richer
+   record (A7).
+3. **`skill_review.py {propose,list,promote,reject}`** (FR-35/FR-36). propose
+   captures the diff at proposal time and is the smith's mandated final act;
+   reject restores `skills/<name>/` to the newest commit whose PURPOSE said
+   `approved` (removal for creates), and both decisions stage only the skill
+   layer + ledgers with a classifier assertion — AC-33 made structural. A
+   rejected create's name is banned for good; a rejected patch is history,
+   not a freeze (A7).
+4. **`skill_trial.py`** (FR-36): answers the repo's own inquiries in two
+   throwaway tree copies (the control copy simply lacks the candidate — real
+   isolation, same prompt), 3 cheap-tier read-only calls per question (two
+   answers + one order-randomized paired judge on the QA-1 rubric; citation
+   coverage is mechanical). Auto-runs when a cycle proposes — wrapper-side in
+   Mode A, step 7 in the remote prompt — so scores are already waiting for
+   the decision; **promotion stays human** (owner's direction + FR-36).
+5. Docs: `references/skill-emergence.md` + `quality-gates.md` (closing
+   FR-13), SKILL.md's "Growing child skills" section, step-3 house-procedure
+   reads in both prompts, the smith's Phase note removed.
 
 ---
 
 ## 3. Testing & definition of done
 
-The §12 checklist is the definition of done, run before final commit of each phase and in full before v1. `smoke_test.sh` orchestrates every item that works without network or `gh`; the pytest suite currently stands at **280 tests**.
+The §12 checklist is the definition of done, run before final commit of each phase and in full before v1. `smoke_test.sh` orchestrates every item that works without network or `gh`; the pytest suite currently stands at **320 tests**.
 
 Fixtures are **built programmatically** in `tests/conftest.py`, not checked in as static files, so every violation fixture is provably "the clean repo with exactly one thing broken" and the reference note's Chicago strings stay self-consistent with its CSL-JSON.
 
@@ -152,16 +182,17 @@ Fixtures are **built programmatically** in `tests/conftest.py`, not checked in a
 7. `serendipity_sweep.py`: embeddings path and LLM-only degradation both write to `/proposed-links/`.
 8. Stub-topic dry-run maintenance cycle: FR-28 order visible in `log.md`; ends lint-clean-committed or aborts without push (NFR-3).
 9. `run.lock`: second concurrent run aborts.
-10. Skill-smith sandbox: proposal only under content-repo `/skills/`; out-of-repo write blocked and logged. **(Phase 4 — the one open item.)**
+10. Skill-smith sandbox: proposal only under content-repo `/skills/`; out-of-repo write blocked and logged. **(Closed by Phase 4; smoke step 8e.)**
 11. `smoke_test.sh` orchestrates 2–8 and exits 0.
 
-Added after the spec was written, and enforced by `smoke_test.sh` steps 8b–8d:
+Added after the spec was written, and enforced by `smoke_test.sh` steps 8b–8e:
 
 12. Maintenance cycle (stub `claude`): FR-28 order visible in `log.md`; a lint violation blocks the push; a second concurrent run aborts on `run.lock`.
 13. Remote cycle: the git lock serializes two clones, work lands on a `zettel/run-*` branch, and `main` is never pushed directly.
 14. Capture: hand-written markdown fails the manifest build (the motivating gap, asserted rather than assumed); everything `capture.py` writes passes all four gates; a burst of captures in one minute gets distinct IDs.
 15. AC-6: an inquiry marked `answered` with empty `result_notes` fails `lint_links.py`; so does a `result_notes` entry that is unresolvable or not a permanent note.
 16. Ad-hoc research: stands down with exit 3 on a lock held by a scheduled run, leaving no half-started work, and its answer reaches `main` only through the required check.
+17. Skill emergence end-to-end (smoke 8e): a smith cycle proposes and pushes; the auto-trial records with/without scores touching nothing but the ledgers; a plugin-repo write is blocked and logged; rejection leaves every knowledge note byte-identical; a rejected create's re-proposal is refused; promotion flips PURPOSE to `approved` with all gates clean.
 
 ---
 

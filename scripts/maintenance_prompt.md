@@ -10,8 +10,12 @@ open questions in work order, and read the ones you plan to work. Entries marked
 `new` are your priorities; human feedback is authoritative and overrides
 everything else in this prompt's plan, including topic gaps.
 
-Step 3. Research and synthesize for the open inquiries and for gaps against the
-`topics` in config.yml. Delegate to the `orchestrator` agent to plan and run
+Step 3. First list the child skills the knowledge base has grown:
+    {{PYTHON}} {{SCRIPTS}}/skill_review.py --repo {{REPO}} list
+and Read the SKILL.md of each `approved` skill relevant to the planned work —
+they are house procedure. Then research and synthesize for the open inquiries
+and for gaps against the `topics` in config.yml. Delegate to the
+`orchestrator` agent to plan and run
 this; it will dispatch `researcher` and `synthesizer` agents in isolated
 worktrees ({{SCRIPTS}}/new_worktree.sh). Every new source must be captured into
 raw/ before its reference note exists.
@@ -41,7 +45,9 @@ it: at most one proposal, only under skills/, finishing with
 merging the worktree back, verify the smith's diff stayed in its sandbox:
     {{PYTHON}} {{SCRIPTS}}/check_skill_sandbox.py --repo <worktree> --base <noted commit> --strict
 If that exits non-zero, do NOT merge the worktree; log the violation and
-continue the cycle without the proposal.
+continue the cycle without the proposal. Do not run the A/B trial yourself:
+the wrapper runs it automatically after your cycle when it sees a new
+proposal recorded.
 
 Step 8. Run the lint gates yourself and fix what they find, re-running until
 clean or until nothing more can be fixed honestly:

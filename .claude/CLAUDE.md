@@ -17,7 +17,7 @@ variables. `.gitignore` covers `.env`, `*.token`, `*.pem`, `.netrc`, `run.lock`.
 ## Running things
 
 ```sh
-.venv/bin/python -m pytest -q      # 280 tests, ~100s
+.venv/bin/python -m pytest -q      # 320 tests, ~100s
 ./smoke_test.sh                    # pytest + end-to-end scaffold; exit 0 or it isn't done
 claude plugin validate --strict .
 ```
@@ -99,14 +99,26 @@ git fetch origin main && git checkout -B claude/<slug> origin/main
 Commit in logical chunks with messages that explain the reasoning, not the
 diff. Never push to `main`; never merge your own PR.
 
-## Phase 4 (skill emergence) — the rails, before you start
-
-`agents/skill-smith.md` is written but the A/B trial harness and promotion flow
-are not shipped; it carries a "Phase note" saying so. Remove that note when
-they land.
+## Skill emergence (Phase 4, shipped) — the standing rails
 
 **FR-37 is absolute: skill-smith may never write to this repo.** Child skills
 are sandboxed under the *content* repo's `skills/` directory until a human
 promotes them, and the knowledge layer is never rolled back for a skill
-outcome. Rejected proposals are permanent history in `skill-impact.md` and are
-never retried. Build the sandbox check before the proposer.
+outcome. Rejected proposals are permanent history in `skill-impact.md` and
+are never retried (name-level, for creates — amendment A7).
+
+Those rails are now code, and changes must keep them that way:
+
+- `maintenance_run.sh` snapshots the plugin tree around the headless run and
+  aborts on any change; smoke step 8e and
+  `test_maintenance_run.py::test_plugin_repo_write_is_blocked_and_logged`
+  assert it. Never route around that check.
+- `zettel_lib/impact.py` is the ONLY writer for `skill-impact.md` — never
+  append to it by hand from a new entry point, or the semantic append-only
+  check in `check_skill_sandbox.py` and the format will drift apart.
+- A patch to an approved skill must flip PURPOSE back to `status: proposed`.
+  The rejection flow finds its restore point by walking history for the
+  newest committed PURPOSE that says `approved`; skip the flip and rejection
+  restores the wrong state.
+- `skill_trial.py` isolates its control arm by copying the tree minus the
+  candidate. Keep isolation in the tree, not in the prompt.

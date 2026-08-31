@@ -30,3 +30,9 @@ models:
 # Slower sub-cadences (FR-28 steps 5 and 7).
 connector_cadence: "weekly"
 skill_smith_cadence: "monthly"
+
+# Inquiry questions per A/B trial arm when a skill proposal lands (FR-36).
+# Each question costs 3 cheap-tier calls (two answers + one paired judge), so
+# this bounds trial spend. Optional: runs default to 3 when the key is absent,
+# so pre-Phase-4 content repos keep working without a config migration.
+trial_questions: 3
