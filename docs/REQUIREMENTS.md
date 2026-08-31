@@ -60,6 +60,36 @@ This turns G3/NFR-3's "no unlinted push" from a prompted behaviour into a
 structural guarantee — a runaway, turn-capped, or budget-cut run cannot push.
 Observable step order in `log.md` (AC-28) is unchanged.
 
+### A4 — Both repositories are public (2026-08-31, §3.3, FR-13)
+
+The spec fixes the skill repo as "Always private". At the repository owner's
+direction both the skill repo and the content repo are **public**. A secret
+scan of every tracked file found no credentials (auth flows through `gh`, the
+SSH agent, or environment variables per NFR-4). Consequences are simplifying:
+cloud environment setup scripts clone the skill repo with no token, and Mode B
+reads the content repo through anonymous raw URLs with no connector.
+
+### A5 — Remote execution model (2026-08-31, FR-25, FR-28, FR-30, FR-32)
+
+Scheduled maintenance may run as Routine-fired remote Claude Code sessions with
+no laptop involved. In that mode, three mechanisms change shape:
+
+- **`run.lock` → git ref.** A filesystem lock cannot serialize ephemeral
+  containers; `refs/zettel/run-lock` provides the same mutual exclusion through
+  git's atomic ref updates (`zettel_lib/gitlock.py`). FR-30's semantics are
+  preserved: a run finding a fresh lock stands down; only provably stale locks
+  are broken.
+- **Wrapper-enforced gates → CI required status check.** The session is the
+  agent and can only offer a branch (`remote_cycle.sh`); a GitHub Actions
+  workflow (`ci/content-repo-gates.yml`) re-runs the lints server-side and a
+  required check decides what merges. This strengthens A3's guarantee — no
+  session can bypass it.
+- **`--max-budget-usd` has no equivalent** for a fired session. Cost is bounded
+  by cadence, prompt scope, and model tier instead; the laptop path retains the
+  hard cap.
+
+The laptop path (FR-25/FR-32 as written) remains fully supported.
+
 -----
 
 ## TL;DR

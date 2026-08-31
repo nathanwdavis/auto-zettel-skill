@@ -10,6 +10,7 @@
 #   7. serendipity sweep proposes cross-community links without editing notes
 #   8. the scaffolded repo ends lint-clean and committed
 #   8b. a stub-driven maintenance cycle runs end-to-end and pushes
+#   8c. the remote cycle: git-ref lock, run branch, no direct push to main
 #   9. run.lock serialization: a second concurrent run aborts
 #
 # Exits 0 only if everything passes.
@@ -140,6 +141,35 @@ SECOND_OUT="$(STUB_CLAUDE_MODE=slow bash scripts/maintenance_run.sh --repo "$MKB
 wait "$FIRST_PID" || fail "first concurrent run failed"
 echo "$SECOND_OUT" | grep -q "another run holds run.lock" || fail "second run did not abort on lock"
 pass "second concurrent run aborted on run.lock (item 9)"
+
+# --- 8c. remote cycle: session-as-agent mechanics ------------------------------
+step "[8c] remote cycle (git lock + run branch)"
+RKB="$WORK/kb-remote"
+PATH="$(dirname "$PY"):$PATH" bash scripts/init_content_repo.sh \
+  --name kb-remote --visibility public --owner smoke-owner \
+  --topics "smoke topic" --dir "$RKB" --no-remote >/dev/null || fail "remote scaffold"
+RORIGIN="$WORK/remote-origin.git"
+git init -q --bare -b main "$RORIGIN"
+git -C "$RKB" remote add origin "$RORIGIN"
+git -C "$RKB" branch -M main && git -C "$RKB" push -q -u origin main
+git -C "$RKB" remote set-head origin -a >/dev/null 2>&1 || true
+
+export PYTHON="$PY"
+RBRANCH="$(ZETTEL_RUN_HOLDER=smoke-1 bash scripts/remote_cycle.sh start --repo "$RKB")" \
+  || fail "remote_cycle start"
+pass "lock claimed, run branch $RBRANCH"
+
+git clone -q "$RORIGIN" "$WORK/kb-remote-2"
+SECOND="$(ZETTEL_RUN_HOLDER=smoke-2 bash scripts/remote_cycle.sh start --repo "$WORK/kb-remote-2"; echo "rc=$?")"
+echo "$SECOND" | grep -q "rc=3" || fail "second remote run did not stand down (got: $SECOND)"
+pass "second container stood down on the git lock (exit 3)"
+
+echo "- smoke change" >> "$RKB/INBOX.md"
+MAIN_BEFORE="$(git -C "$RORIGIN" rev-parse main)"
+bash scripts/remote_cycle.sh finish --repo "$RKB" --title "smoke cycle" >/dev/null || fail "remote_cycle finish"
+[[ "$(git -C "$RORIGIN" rev-parse main)" == "$MAIN_BEFORE" ]] || fail "remote cycle pushed to main directly"
+git -C "$RORIGIN" branch | grep -q "$RBRANCH" || fail "run branch missing from origin"
+pass "work landed on the run branch; main untouched (CI decides)"
 
 # --- 4. lints fail on violations ----------------------------------------------
 step "[4] planted violations are rejected"
