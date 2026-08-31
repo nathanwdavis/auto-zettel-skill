@@ -81,3 +81,7 @@ def test_skill_smith_prompt_carries_the_fr37_rails():
     prompt = agents_mod.parse_agent(AGENTS_DIR / "skill-smith.md")["_prompt"]
     assert "Never modify the zettel-bootstrap skill repo" in prompt
     assert "one proposal per cycle" in prompt
+    # Phase 4 shipped: proposals go through the recorded flow, and the
+    # pre-harness "Phase note" is gone
+    assert "skill_review.py" in prompt
+    assert "Phase note" not in prompt

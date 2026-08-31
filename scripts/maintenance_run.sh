@@ -135,6 +135,13 @@ RUN_LOG="$RESULTS_DIR/$RUN_ID.log"
 # `/path/to/.venv/bin/python ...`, which silently denies every script call.
 ALLOWED_TOOLS="Read,Write,Edit,Glob,Grep,Agent,WebSearch,WebFetch,Bash(${PYBIN}:*),Bash(python:*),Bash(python3:*),Bash(git add:*),Bash(git commit:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git merge:*),Bash(git worktree:*),Bash(git branch:*),Bash(bash:*)"
 
+# AC-37's red line: a run has no reason to write to the plugin repo, so any
+# change to it is a sandbox violation, not a judgment call. Snapshot the tree
+# around the headless run; the comparison is pre-vs-post, so a plugin checkout
+# that was already dirty (a dev machine) still passes as long as the run
+# itself touched nothing.
+PLUGIN_PRE_STATE="$(git -C "$PLUGIN_ROOT" status --porcelain 2>/dev/null; git -C "$PLUGIN_ROOT" rev-parse HEAD 2>/dev/null)"
+
 set +e
 ( cd "$REPO" && "$CLAUDE_BIN" -p "$PROMPT" \
   --plugin-dir "$PLUGIN_ROOT" \
@@ -150,6 +157,14 @@ set +e
 CLAUDE_EXIT=$?
 set -e
 
+PLUGIN_POST_STATE="$(git -C "$PLUGIN_ROOT" status --porcelain 2>/dev/null; git -C "$PLUGIN_ROOT" rev-parse HEAD 2>/dev/null)"
+if [[ "$PLUGIN_PRE_STATE" != "$PLUGIN_POST_STATE" ]]; then
+  log "maintenance_run: SANDBOX VIOLATION plugin repo modified; nothing pushed"
+  echo "SANDBOX VIOLATION: the run modified the zettel-bootstrap plugin repo (FR-37)." >&2
+  echo "Inspect: git -C $PLUGIN_ROOT status; commits in $REPO are preserved locally." >&2
+  exit 1
+fi
+
 if [[ $CLAUDE_EXIT -ne 0 ]]; then
   log "maintenance_run: ABORT claude exited $CLAUDE_EXIT (turn/budget cutoff or error); nothing pushed"
   echo "claude run failed (exit $CLAUDE_EXIT); see $RUN_LOG" >&2
@@ -158,9 +173,30 @@ if [[ $CLAUDE_EXIT -ne 0 ]]; then
 fi
 log "maintenance_run: headless run complete (result: $RESULT_JSON)"
 
+# --- step 7b: A/B trial when the cycle proposed a skill (FR-36) ---------------
+# The wrapper, not the session, runs the trial: it needs fresh read-only
+# claude calls, and nesting them inside the headless run would cost turns and
+# an allowlist hole. A failed trial does not fail the run — the proposal
+# stands recorded and a human can run skill_trial.py by hand; only the human
+# gate decides promotion either way.
+NEW_PROPOSAL="$(git -C "$REPO" diff "$PRE_HEAD" -- skill-impact.md 2>/dev/null \
+  | awk -F'|' '/^\+\|/ { gsub(/ /,"",$5); if ($5=="proposed") { gsub(/ /,"",$4); print $4 } }' | head -1)"
+if [[ -n "$NEW_PROPOSAL" ]]; then
+  log "maintenance_run: step 7b A/B trial for proposal $NEW_PROPOSAL"
+  if PYTHONPATH="$SCRIPT_DIR" "$PYBIN" "$SCRIPT_DIR/skill_trial.py" --repo "$REPO" \
+       --skill "$NEW_PROPOSAL" --claude-bin "$CLAUDE_BIN" >> "$RUN_LOG" 2>&1; then
+    git -C "$REPO" add skill-impact.md log.md
+    git -C "$REPO" -c user.name="zettel-bootstrap" -c user.email="noreply@localhost" \
+      commit -q -m "Record A/B trial scores for $NEW_PROPOSAL"
+  else
+    log "maintenance_run: skill_trial FAILED for $NEW_PROPOSAL; proposal stands, run it manually"
+  fi
+fi
+
 # --- independent gates (amendment A3; NFR-3) ----------------------------------
 GATES_OK=1
-for gate in "build_manifest.py --check" "lint_citations.py" "lint_links.py"; do
+for gate in "build_manifest.py --check" "lint_citations.py" "lint_links.py" \
+            "lint_skills.py" "check_skill_sandbox.py --base $PRE_HEAD"; do
   if ! PYTHONPATH="$SCRIPT_DIR" "$PYBIN" $SCRIPT_DIR/${gate%% *} --repo "$REPO" ${gate#*.py} >> "$RUN_LOG" 2>&1; then
     log "maintenance_run: GATE FAILED ${gate%% *}; nothing pushed"
     GATES_OK=0

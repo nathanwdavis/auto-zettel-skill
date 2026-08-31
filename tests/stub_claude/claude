@@ -9,6 +9,10 @@
 #   overbudget partial commit then exit 7 (simulated --max-turns cutoff)
 #   push       like good, but also tries to git push (must be a no-op rail test)
 #   slow       like good, but sleeps 3s first (lock-contention tests)
+#   smith        like good, plus a wellformed child-skill proposal recorded via
+#                skill_review.py propose (the FR-35 happy path)
+#   smith-escape like smith, but also plants a file in the PLUGIN repo — the
+#                AC-37 write the wrapper must block and log
 
 set -euo pipefail
 
@@ -19,6 +23,32 @@ for ((i=0; i<${#args[@]}; i++)); do
   if [[ "${args[$i]}" == "-p" ]]; then PROMPT="${args[$((i+1))]}"; fi
   if [[ "${args[$i]}" == "--allowedTools" ]]; then ALLOWED="${args[$((i+1))]}"; fi
 done
+
+# --- skill_trial.py calls: read-only answer/judge sessions --------------------
+# These arrive with --allowedTools "Read,Glob,Grep" and no "repository at"
+# line in the prompt, so they must be handled before the maintenance-run
+# assertions below. The with-arm is detectable by the candidate skill's
+# presence in the working copy; its canned answer cites a real manifest key
+# so citation coverage separates the arms deterministically.
+if [[ "$PROMPT" == *"answering one question from a zettelkasten"* ]]; then
+  KEY="$(grep -o '"key": "[^"]*"' manifest.json 2>/dev/null | head -1 | cut -d'"' -f4 || true)"
+  if ls skills/*/SKILL.md >/dev/null 2>&1; then
+    printf '{"result":"Following the house procedure: grounded in [[%s]]."}\n' "$KEY"
+  else
+    printf '{"result":"An unsourced answer citing [[no-such-note--000000000000]]."}\n'
+  fi
+  exit 0
+fi
+if [[ "$PROMPT" == *"judging two answers"* ]]; then
+  A_PART="${PROMPT#*=== Answer A ===}"
+  A_PART="${A_PART%%=== Answer B ===*}"
+  if [[ "$A_PART" == *"house procedure"* ]]; then
+    echo '{"result":"{\"a\": 0.9, \"b\": 0.7}"}'
+  else
+    echo '{"result":"{\"a\": 0.7, \"b\": 0.9}"}'
+  fi
+  exit 0
+fi
 
 # Regression check for the word-splitting bug that shattered the allowlist:
 # the whole list must arrive as ONE argument still containing the space-y
@@ -97,6 +127,55 @@ fi
 PYBIN="${PYTHON:-python3}"
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../scripts" && pwd)"
 PYTHONPATH="$SCRIPTS_DIR" "$PYBIN" "$SCRIPTS_DIR/build_manifest.py" --repo "$REPO" >/dev/null
+
+if [[ "$MODE" == smith* ]]; then
+  # A wellformed proposal citing the fleeting note this run just added (its
+  # key resolves once the manifest above is rebuilt), recorded the way the
+  # smith is instructed to: skill_review.py propose, as its final act.
+  mkdir -p "$REPO/skills/demo-skill"
+  cat > "$REPO/skills/demo-skill/SKILL.md" <<'SKILLMD'
+---
+name: demo-skill
+description: A stub-proposed child skill for sandbox testing.
+---
+# demo-skill
+
+## When to use
+In stub maintenance runs.
+
+## Procedure
+1. Exist.
+SKILLMD
+  cat > "$REPO/skills/demo-skill/PURPOSE.md" <<'PURPOSEMD'
+---
+skill: "demo-skill"
+status: proposed
+proposal_id: ""
+kind: create
+proposed: "2099-01-01"
+decided: ""
+---
+# Purpose — demo-skill
+
+## Origin
+Proposed by the stub retrospective.
+
+## Patterns-Addressed
+Motivated by [[stub-run-observation--209901010001]].
+
+## Evolution-History
+| date | change | outcome |
+|------|--------|---------|
+PURPOSEMD
+  PYTHONPATH="$SCRIPTS_DIR" "$PYBIN" "$SCRIPTS_DIR/skill_review.py" --repo "$REPO" \
+    propose --skill demo-skill --kind create \
+    --motivation "stub agents keep reinventing this" >/dev/null
+fi
+
+if [[ "$MODE" == "smith-escape" ]]; then
+  STUB_PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+  echo "escaped" > "$STUB_PLUGIN_ROOT/.stub-escape"
+fi
 
 git -C "$REPO" add -A
 git -C "$REPO" -c user.name=stub -c user.email=stub@localhost \

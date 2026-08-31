@@ -36,7 +36,8 @@ trap 'rm -rf "$WORK"' EXIT
 # --- 2. scripts respond to --help --------------------------------------------
 step "[2] script CLI contract"
 for s in build_manifest.py lint_citations.py lint_links.py verify_refs.py fetch_remote.py \
-         serendipity_sweep.py capture.py inquiries.py; do
+         serendipity_sweep.py capture.py inquiries.py lint_skills.py \
+         check_skill_sandbox.py skill_review.py skill_trial.py; do
   "$PY" "scripts/$s" --help >/dev/null 2>&1 || fail "scripts/$s --help"
   pass "scripts/$s --help"
 done
@@ -234,6 +235,97 @@ bash scripts/remote_cycle.sh finish --repo "$AKB" --title "smoke ad-hoc" >/dev/n
   || fail "ad-hoc research pushed to main directly"
 git -C "$RORIGIN" branch | grep -q "$ABRANCH" || fail "ad-hoc branch missing from origin"
 pass "the ad-hoc answer landed on a branch; main untouched"
+
+# --- 8e. skill sandbox: proposal, escape, reject, promote (checklist 10) -------
+step "[8e] skill-smith sandbox and review flow"
+SKB="$WORK/kb-skills"
+PATH="$(dirname "$PY"):$PATH" bash scripts/init_content_repo.sh \
+  --name kb-skills --visibility public --owner smoke-owner \
+  --topics "smoke topic" --dir "$SKB" --no-remote >/dev/null || fail "skills scaffold"
+SORIGIN="$WORK/skills-origin.git"
+git init -q --bare -b main "$SORIGIN"
+git -C "$SKB" remote add origin "$SORIGIN"
+git -C "$SKB" branch -M main && git -C "$SKB" push -q -u origin main
+
+NOTE_HASH() { find "$1" \( -path '*/permanent/*' -o -path '*/literature/*' \
+  -o -path '*/reference/*' -o -path '*/moc/*' \) -name '*.md' \
+  -exec sha256sum {} + | sort | sha256sum; }
+
+# an inquiry for the auto-trial to answer, committed so preflight stays clean
+"$PY" scripts/capture.py --repo "$SKB" inquiry "Does the smoke trial fire?" >/dev/null \
+  || fail "capture inquiry for trial"
+git -C "$SKB" add -A && git -C "$SKB" -c user.name=smoke -c user.email=s@localhost \
+  commit -q -m "smoke: trial inquiry"
+
+BEFORE_NOTES_TRIAL="$(NOTE_HASH "$SKB")"
+STUB_CLAUDE_MODE=smith bash scripts/maintenance_run.sh --repo "$SKB" --claude-bin "$STUB" >/dev/null \
+  || fail "smith maintenance run"
+git -C "$SORIGIN" ls-tree -r --name-only main | grep -q "skills/demo-skill/SKILL.md" \
+  || fail "proposal did not reach origin"
+grep -q "proposed" "$SKB/skill-impact.md" || fail "proposal not recorded in skill-impact.md"
+"$PY" scripts/lint_skills.py --repo "$SKB" >/dev/null || fail "lint_skills after proposal"
+pass "smith cycle proposed skills/demo-skill and recorded it (FR-35)"
+
+# the wrapper auto-ran the A/B trial: scores recorded, notes untouched (FR-36)
+grep -q "skill_trial: demo-skill with=" "$SKB/log.md" || fail "trial scores not logged"
+grep -q "| trial |" "$SKB/skill-impact.md" || fail "trial record missing from skill-impact.md"
+ls "$WORK/runs"/trial-demo-skill-*.json >/dev/null 2>&1 || fail "trial scores JSON not written"
+[[ "$(NOTE_HASH "$SKB")" == "$BEFORE_NOTES_TRIAL" ]] || fail "the trial modified knowledge notes"
+pass "A/B trial auto-ran with the proposal; scores await the human gate (FR-36)"
+
+SKB_MAIN="$(git -C "$SORIGIN" rev-parse main)"
+# gate PASS lines land in log.md after the run's commit; drop them so the
+# next run's clean-tree preflight is exercised on the pushed state
+git -C "$SKB" reset -q --hard "$SKB_MAIN"
+STUB_CLAUDE_MODE=smith-escape bash scripts/maintenance_run.sh --repo "$SKB" --claude-bin "$STUB" >/dev/null 2>&1 \
+  && { rm -f "$ROOT/.stub-escape"; fail "plugin-repo write should fail the run"; }
+rm -f "$ROOT/.stub-escape"
+[[ "$(git -C "$SORIGIN" rev-parse main)" == "$SKB_MAIN" ]] || fail "escape run pushed"
+grep -q "SANDBOX VIOLATION" "$SKB/log.md" || fail "sandbox violation not logged"
+pass "an out-of-repo write attempt was blocked and logged (AC-37, item 10)"
+
+# reset to the pushed proposal state; the escape run's commit stays local otherwise
+git -C "$SKB" reset -q --hard "$SKB_MAIN"
+BEFORE_NOTES="$(NOTE_HASH "$SKB")"
+"$PY" scripts/skill_review.py --repo "$SKB" reject --skill demo-skill \
+  --reason "smoke rejection" >/dev/null || fail "skill_review reject"
+[[ ! -d "$SKB/skills/demo-skill" ]] || fail "rejected create not removed"
+[[ "$(NOTE_HASH "$SKB")" == "$BEFORE_NOTES" ]] || fail "rejection touched knowledge notes (AC-33)"
+grep -q "Rejected" "$SKB/skill-impact.md" || fail "rejection not recorded"
+"$PY" scripts/lint_skills.py --repo "$SKB" >/dev/null || fail "lint_skills after rejection"
+pass "rejection reverted the skill layer only; knowledge untouched (FR-36/AC-33)"
+
+# the lint's PASS line above is uncommitted log noise; drop it so preflight passes
+git -C "$SKB" checkout -q -- log.md
+STUB_CLAUDE_MODE=smith bash scripts/maintenance_run.sh --repo "$SKB" --claude-bin "$STUB" >/dev/null 2>&1 \
+  && fail "re-proposal of a rejected create should fail the gates"
+grep -q "re-proposed-skill\|REFUSED re-proposal" "$SKB/log.md" \
+  || fail "re-proposal not flagged"
+# drop the aborted run's leavings but KEEP the rejection commit and record
+git -C "$SKB" checkout -q -- . && git -C "$SKB" clean -qfd
+pass "a rejected create is never retried (AC-36)"
+
+"$PY" - "$SKB" <<'PYEOF'
+import sys
+sys.path.insert(0, "tests"); sys.path.insert(0, "scripts")
+from pathlib import Path
+from conftest import plant_skill
+repo = Path(sys.argv[1])
+plant_skill(repo, "keeper-skill", cite="stub-run-observation--209901010001")
+PYEOF
+"$PY" scripts/skill_review.py --repo "$SKB" propose --skill keeper-skill \
+  --kind create --motivation "smoke promotion" >/dev/null || fail "propose keeper-skill"
+git -C "$SKB" add -A && git -C "$SKB" -c user.name=smoke -c user.email=s@localhost \
+  commit -q -m "smoke: keeper proposal"
+"$PY" scripts/skill_review.py --repo "$SKB" promote --skill keeper-skill \
+  --reason "smoke approval" >/dev/null || fail "skill_review promote"
+grep -q "status: approved" "$SKB/skills/keeper-skill/PURPOSE.md" || fail "promotion did not flip status"
+"$PY" scripts/skill_review.py --repo "$SKB" list | grep -q "keeper-skill.*approved" \
+  || fail "list does not show the approved skill"
+for g in build_manifest.py lint_citations.py lint_links.py lint_skills.py; do
+  "$PY" "scripts/$g" --repo "$SKB" >/dev/null || fail "$g after promotion"
+done
+pass "promotion flipped status to approved and every gate stays clean (FR-36)"
 
 # --- 4. lints fail on violations ----------------------------------------------
 step "[4] planted violations are rejected"

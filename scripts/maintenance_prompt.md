@@ -10,8 +10,12 @@ open questions in work order, and read the ones you plan to work. Entries marked
 `new` are your priorities; human feedback is authoritative and overrides
 everything else in this prompt's plan, including topic gaps.
 
-Step 3. Research and synthesize for the open inquiries and for gaps against the
-`topics` in config.yml. Delegate to the `orchestrator` agent to plan and run
+Step 3. First list the child skills the knowledge base has grown:
+    {{PYTHON}} {{SCRIPTS}}/skill_review.py --repo {{REPO}} list
+and Read the SKILL.md of each `approved` skill relevant to the planned work —
+they are house procedure. Then research and synthesize for the open inquiries
+and for gaps against the `topics` in config.yml. Delegate to the
+`orchestrator` agent to plan and run
 this; it will dispatch `researcher` and `synthesizer` agents in isolated
 worktrees ({{SCRIPTS}}/new_worktree.sh). Every new source must be captured into
 raw/ before its reference note exists.
@@ -33,15 +37,24 @@ groundedness (flag < 0.80, block < 0.70), atomicity, clarity, link quality.
 A blocked note must not merge to the main branch — leave it in its worktree.
 
 Step 7. Skill-smith retrospective — ONLY if config.yml `skill_smith_cadence`
-is due (check log.md for the last `skill-smith:` entry). If due, delegate to
-the `skill-smith` agent: at most one proposal, only under skills/, recorded in
-skill-impact.md.
+is due (check log.md for the last `skill-smith:` entry). If due, note the
+current commit (`git rev-parse HEAD`), create a worktree
+({{SCRIPTS}}/new_worktree.sh) and delegate to the `skill-smith` agent inside
+it: at most one proposal, only under skills/, finishing with
+`skill_review.py propose` so the diff is recorded in skill-impact.md. Before
+merging the worktree back, verify the smith's diff stayed in its sandbox:
+    {{PYTHON}} {{SCRIPTS}}/check_skill_sandbox.py --repo <worktree> --base <noted commit> --strict
+If that exits non-zero, do NOT merge the worktree; log the violation and
+continue the cycle without the proposal. Do not run the A/B trial yourself:
+the wrapper runs it automatically after your cycle when it sees a new
+proposal recorded.
 
 Step 8. Run the lint gates yourself and fix what they find, re-running until
 clean or until nothing more can be fixed honestly:
     {{PYTHON}} {{SCRIPTS}}/verify_refs.py --repo {{REPO}} {{VERIFY_ARGS}}
     {{PYTHON}} {{SCRIPTS}}/lint_citations.py --repo {{REPO}}
     {{PYTHON}} {{SCRIPTS}}/lint_links.py --repo {{REPO}}
+    {{PYTHON}} {{SCRIPTS}}/lint_skills.py --repo {{REPO}}
 Never fix a lint by deleting knowledge, weakening a claim's sourcing, or
 marking something verified that is not.
 
