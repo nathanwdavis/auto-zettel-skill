@@ -99,6 +99,44 @@ def test_a_stale_lock_is_broken_so_a_crash_cannot_wedge_the_schedule(content_rep
     assert "broke stale lock from crashed-container" in result.stderr
 
 
+def test_start_survives_a_clone_without_origin_head(content_repo):
+    """The P0 from issue #7: remote-session clones lack refs/remotes/origin/HEAD,
+    and under pipefail the old symbolic-ref call exited 128 before the fallback
+    could apply -- every scheduled run stood down having done nothing."""
+    repo, _ = content_repo
+    subprocess.run(["git", "-C", str(repo), "symbolic-ref", "--delete",
+                    "refs/remotes/origin/HEAD"], capture_output=True, check=False)
+    result = cycle(repo, "start")
+    assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+    assert result.stdout.strip().startswith("zettel/run-")
+    assert gitlock.read(repo) is not None
+
+
+def test_default_branch_other_than_main_resolves_in_start_and_finish(tmp_path):
+    """Finding 2: finish used to hard-fall-back to origin/main, misreading a
+    real cycle on a trunk-defaulted repo as 'no changes'."""
+    repo = build_clean_repo(tmp_path / "kb")
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "trunk", str(origin)], check=True)
+    git = ["git", "-C", str(repo)]
+    subprocess.run(git + ["init", "-q", "-b", "trunk"], check=True)
+    for key, value in (("user.name", "t"), ("user.email", "t@localhost")):
+        subprocess.run(git + ["config", key, value], check=True)
+    subprocess.run(git + ["add", "-A"], check=True)
+    subprocess.run(git + ["commit", "-qm", "genesis"], check=True)
+    subprocess.run(git + ["remote", "add", "origin", str(origin)], check=True)
+    subprocess.run(git + ["push", "-q", "-u", "origin", "trunk"], check=True)
+    # deliberately NO `remote set-head`: resolution must ask the remote
+
+    branch = cycle(repo, "start").stdout.strip()
+    assert branch.startswith("zettel/run-")
+    (repo / "INBOX.md").write_text("# Inbox\n\ntrunk work\n", encoding="utf-8")
+    result = cycle(repo, "finish", "--title", "Trunk cycle")
+    assert result.returncode == 0, result.stderr
+    assert "no changes" not in result.stdout
+    assert branch in branches_on(origin)
+
+
 # --- finish -------------------------------------------------------------------
 
 def test_finish_pushes_a_branch_and_releases_the_lock(content_repo):
@@ -134,6 +172,64 @@ def test_finish_with_no_changes_releases_without_pushing(content_repo):
     assert "no changes" in result.stdout
     assert gitlock.read(repo) is None
     assert not [b for b in branches_on(origin) if b.startswith("zettel/run-")]
+
+
+def test_finish_leaves_a_clean_tree(content_repo):
+    """Finding 5: the release log line used to land AFTER the commit, so every
+    cycle ended dirty with a line that could never reach the pushed branch."""
+    repo, _ = content_repo
+    cycle(repo, "start")
+    (repo / "INBOX.md").write_text("# Inbox\n\nwork\n", encoding="utf-8")
+    assert cycle(repo, "finish").returncode == 0
+    status = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"],
+                            capture_output=True, text=True, check=True).stdout
+    assert status.strip() == "", f"finish left a dirty tree:\n{status}"
+
+
+def test_finish_notices_an_already_merged_run_branch(content_repo):
+    """Finding 10: re-finishing a branch whose work was squash-merged used to
+    open an empty duplicate PR. Squash means ancestry never matches -- the
+    guard has to compare trees."""
+    repo, origin = content_repo
+    branch = cycle(repo, "start").stdout.strip()
+    (repo / "INBOX.md").write_text("# Inbox\n\nmerged work\n", encoding="utf-8")
+    assert cycle(repo, "finish").returncode == 0
+
+    git = ["git", "-C", str(repo)]
+    subprocess.run(git + ["checkout", "-q", "main"], check=True)
+    subprocess.run(git + ["merge", "--squash", "-q", branch], check=True)
+    subprocess.run(git + ["commit", "-qm", "squash of the run branch"], check=True)
+    subprocess.run(git + ["push", "-q", "origin", "main"], check=True)
+    subprocess.run(git + ["checkout", "-q", branch], check=True)
+    main_after_merge = subprocess.run(
+        ["git", "-C", str(origin), "rev-parse", "main"],
+        capture_output=True, text=True, check=True).stdout
+
+    result = cycle(repo, "finish")
+    assert result.returncode == 0, result.stderr
+    assert "already merged" in result.stdout
+    assert subprocess.run(["git", "-C", str(origin), "rev-parse", "main"],
+                          capture_output=True, text=True,
+                          check=True).stdout == main_after_merge
+
+
+def test_release_reasons_land_on_the_lock_branch(content_repo):
+    """Issue #7 comment: a failed start and a healthy no-op were previously
+    indistinguishable from the repo. The reason rides the release commit."""
+    repo, _ = content_repo
+    cycle(repo, "start")
+    cycle(repo, "finish")  # empty cycle
+    cycle(repo, "start")
+    (repo / "INBOX.md").write_text("# Inbox\n\nreal work\n", encoding="utf-8")
+    cycle(repo, "finish")
+
+    subprocess.run(["git", "-C", str(repo), "fetch", "-q", "origin",
+                    gitlock.LOCK_BRANCH], check=True)
+    subjects = subprocess.run(
+        ["git", "-C", str(repo), "log", "FETCH_HEAD", "--format=%s"],
+        capture_output=True, text=True, check=True).stdout
+    assert "lock: release (empty-cycle)" in subjects
+    assert "lock: release (finished zettel/run-" in subjects
 
 
 def test_finish_refuses_when_not_on_a_run_branch(content_repo):
@@ -183,14 +279,94 @@ def test_status_reports_free_then_held(content_repo):
     assert "lock: run-x" in cycle(repo, "status").stdout
 
 
-def test_every_step_is_logged(content_repo):
+def test_every_step_is_logged_with_the_skill_revision(content_repo):
     repo, _ = content_repo
     cycle(repo, "start")
     (repo / "INBOX.md").write_text("# Inbox\n\nx\n", encoding="utf-8")
     cycle(repo, "finish")
     log = (repo / "log.md").read_text(encoding="utf-8")
-    for marker in ("remote_cycle: start", "remote_cycle: pushed", "remote_cycle: lock released"):
+    # every cycle is self-dating: start and finish both carry the skill rev
+    for marker in ("remote_cycle: start", "remote_cycle: finish", "skill-rev="):
         assert marker in log
+    # ...and the logged lines are all COMMITTED (a post-commit log line can
+    # never reach the pushed branch, finding 5)
+    committed = subprocess.run(
+        ["git", "-C", str(repo), "show", "HEAD:log.md"],
+        capture_output=True, text=True, check=True).stdout
+    assert committed == log
+
+
+# --- refresh-skill (issue #7, finding 7) --------------------------------------
+
+def _fake_skill_install(tmp_path):
+    """A throwaway 'skill repo' containing the real script, plus its clone.
+
+    refresh-skill updates the checkout the SCRIPT lives in, so exercising it
+    against the real dev repo would fetch from GitHub and race real branches.
+    """
+    src = tmp_path / "skill-src"
+    (src / "scripts").mkdir(parents=True)
+    (src / "scripts" / "remote_cycle.sh").write_bytes(SCRIPT.read_bytes())
+    (src / "scripts" / "remote_cycle.sh").chmod(0o755)
+    git = ["git", "-C", str(src)]
+    subprocess.run(git + ["init", "-q", "-b", "main"], check=True)
+    for key, value in (("user.name", "t"), ("user.email", "t@localhost")):
+        subprocess.run(git + ["config", key, value], check=True)
+    subprocess.run(git + ["add", "-A"], check=True)
+    subprocess.run(git + ["commit", "-qm", "v1"], check=True)
+    install = tmp_path / "skill-install"
+    subprocess.run(["git", "clone", "-q", str(src), str(install)], check=True)
+    return src, install
+
+
+def _advance(src, name, text):
+    (src / name).write_text(text, encoding="utf-8")
+    subprocess.run(["git", "-C", str(src), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(src), "commit", "-qm", f"add {name}"], check=True)
+
+
+def _head(repo):
+    return subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_refresh_skill_fast_forwards_a_clean_install(tmp_path):
+    src, install = _fake_skill_install(tmp_path)
+    _advance(src, "new-fix.txt", "a fix that must reach scheduled runs\n")
+
+    result = subprocess.run([str(install / "scripts" / "remote_cycle.sh"),
+                             "refresh-skill"], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert "skill refreshed:" in result.stdout
+    assert _head(install) == _head(src)
+    assert (install / "new-fix.txt").exists()
+
+
+def test_refresh_skill_declines_a_diverged_install_harmlessly(tmp_path):
+    """ff-only is the safety property: a dev checkout is declined, never damaged."""
+    src, install = _fake_skill_install(tmp_path)
+    (install / "local-work.txt").write_text("uncommitted dev work\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(install), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(install), "-c", "user.name=t",
+                    "-c", "user.email=t@localhost", "commit", "-qm", "local"], check=True)
+    local_head = _head(install)
+    _advance(src, "upstream.txt", "upstream moved on\n")
+
+    result = subprocess.run([str(install / "scripts" / "remote_cycle.sh"),
+                             "refresh-skill"], capture_output=True, text=True)
+    assert result.returncode == 0, "refresh is advisory; it must never fail a cycle"
+    assert "cannot fast-forward" in result.stderr
+    assert _head(install) == local_head
+    assert (install / "local-work.txt").read_text(encoding="utf-8") \
+        == "uncommitted dev work\n"
+
+
+def test_refresh_skill_is_a_noop_when_current(tmp_path):
+    _, install = _fake_skill_install(tmp_path)
+    result = subprocess.run([str(install / "scripts" / "remote_cycle.sh"),
+                             "refresh-skill"], capture_output=True, text=True)
+    assert result.returncode == 0
+    assert "already current" in result.stdout
 
 
 def test_help_and_bad_subcommand(content_repo):

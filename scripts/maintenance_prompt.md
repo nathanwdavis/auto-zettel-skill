@@ -5,6 +5,13 @@ Follow this cycle IN ORDER. After completing each step, append one line to
 log.md in the form `- <UTC timestamp> step <N>: <what happened>` so the run is
 auditable. Skip a step only when it has nothing to do, and log the skip.
 
+Where a step says to delegate to a named agent and that agent is not
+available in this session, adopt its role directly: read the matching
+`agents/<name>.md` and follow it, logging the step as `(self-review)`. The
+critic gate (step 6) is YOUR responsibility either way — delegation is an
+optimization, never a precondition, and a missing agent is never a reason to
+skip the gate.
+
 Step 2. Read INBOX.md, then `inquiries.py --repo <repo> --status new` for the
 open questions in work order, and read the ones you plan to work. Entries marked
 `new` are your priorities; human feedback is authoritative and overrides

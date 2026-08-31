@@ -1,6 +1,6 @@
 # Build Plan — `zettel-bootstrap` Claude Code Skill
 
-**Source of truth:** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (all FR-x / AC-x / NFR-x / QA-x / checklist references below point there). Deviations forced by implementation are recorded there as numbered amendments — **A1–A7** so far.
+**Source of truth:** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (all FR-x / AC-x / NFR-x / QA-x / checklist references below point there). Deviations forced by implementation are recorded there as numbered amendments — **A1–A8** so far.
 **Working on this repo:** [`.claude/CLAUDE.md`](.claude/CLAUDE.md) — how to run the suite, the environment's sharp edges, and the conventions.
 **This repo:** the skill repo. It contains ONLY the `zettel-bootstrap` plugin — never zettelkasten content. The content repo is created at genesis runtime by `init_content_repo.sh` and is out of scope for this repo's file tree. Both repos are public (A4); nothing here may contain a secret (NFR-4).
 **Status:** All phases complete — 1, 2, 3, 3.5, 3.6 (PR #5), and 4. Every §12 checklist item passes.
@@ -51,7 +51,7 @@ smoke_test.sh
 .gitignore                          # NFR-4: run.lock, *.token, .env, *.pem, caches
 README.md                           # install + usage (FR-17)
 .claude/CLAUDE.md                   # guidance for developing the skill itself
-docs/REQUIREMENTS.md                # the spec, with amendments A1-A6
+docs/REQUIREMENTS.md                # the spec, with amendments A1-A8
 PLAN.md                             # this file
 ```
 
@@ -168,7 +168,7 @@ tested before the proposer could run against it.
 
 ## 3. Testing & definition of done
 
-The §12 checklist is the definition of done, run before final commit of each phase and in full before v1. `smoke_test.sh` orchestrates every item that works without network or `gh`; the pytest suite currently stands at **320 tests**.
+The §12 checklist is the definition of done, run before final commit of each phase and in full before v1. `smoke_test.sh` orchestrates every item that works without network or `gh`; the pytest suite currently stands at **333 tests**.
 
 Fixtures are **built programmatically** in `tests/conftest.py`, not checked in as static files, so every violation fixture is provably "the clean repo with exactly one thing broken" and the reference note's Chicago strings stay self-consistent with its CSL-JSON.
 
@@ -207,7 +207,7 @@ Added after the spec was written, and enforced by `smoke_test.sh` steps 8b–8e:
 
 **Still live:**
 
-- **`ci/setup-environment.sh` is cached per environment.** The skill version freezes at cache time, so a fix pushed here does not reach scheduled runs until that script is edited (changing `ZETTEL_SKILL_REF` suffices). Stability feature, freshness trap.
+- ~~**`ci/setup-environment.sh` is cached per environment.**~~ — **fired live** (issue #7): a scheduled session ran 12 commits stale, silently. The cache is now only the bootstrap; `remote_cycle.sh refresh-skill` fast-forwards the install before every remote cycle, and every `start`/`finish` logs the skill revision (A8). Pinning `ZETTEL_SKILL_REF` to a tag still freezes runs deliberately.
 - **Server-side `web_fetch` URL-origin restriction**: skill-embedded URLs are not fetchable on claude.ai/API — the FR-31 five-path design is mandatory, with `fetch_remote.py` as the primary container-side mechanism.
 - **Private content repo + Mode B**: requires authenticated GitHub MCP; must be configured and tested before Phase 2 sign-off if the user needs private Mode B.
 - **Crossref rate limits** (revised effective 2025-12-01): always send `mailto`, back off on 429.

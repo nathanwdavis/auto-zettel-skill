@@ -89,7 +89,7 @@ def test_empty_capture_is_unverified(clean_repo):
 
 def test_crossref_doi_lookup_verifies(clean_repo):
     note = set_csl(clean_repo, DOI="10.1145/3477132.3483540")
-    ok, method, source = verify_refs.verify_note(
+    ok, method, source, _ = verify_refs.verify_note(
         note, repo_of(clean_repo), offline=False, mailto="me@example.org",
         transport=cassette(**{"api.crossref.org": CROSSREF_OK}))
     assert (ok, method) == (True, "crossref")
@@ -120,7 +120,7 @@ def test_crossref_backs_off_on_429_then_succeeds(clean_repo):
 
 def test_reference_that_misses_every_lookup_is_not_verified(clean_repo):
     note = set_csl(clean_repo, DOI="10.9999/does-not-exist")
-    ok, method, _ = verify_refs.verify_note(
+    ok, method, _, _ = verify_refs.verify_note(
         note, repo_of(clean_repo), offline=False, mailto="me@example.org",
         transport=cassette(**{"api.crossref.org": CROSSREF_MISS,
                               "openlibrary.org": OPENLIBRARY_MISS,
@@ -130,7 +130,7 @@ def test_reference_that_misses_every_lookup_is_not_verified(clean_repo):
 
 def test_isbn_verifies_via_open_library(clean_repo):
     note = set_csl(clean_repo)
-    ok, method, _ = verify_refs.verify_note(
+    ok, method, _, _ = verify_refs.verify_note(
         note, repo_of(clean_repo), offline=False, mailto="me@example.org",
         transport=cassette(**{"openlibrary.org": OPENLIBRARY_OK}))
     assert (ok, method) == (True, "openlibrary")
@@ -138,7 +138,7 @@ def test_isbn_verifies_via_open_library(clean_repo):
 
 def test_isbn_falls_back_to_google_books(clean_repo):
     note = set_csl(clean_repo)
-    ok, method, _ = verify_refs.verify_note(
+    ok, method, _, _ = verify_refs.verify_note(
         note, repo_of(clean_repo), offline=False, mailto="me@example.org",
         transport=cassette(**{"openlibrary.org": OPENLIBRARY_MISS,
                               "googleapis.com": GOOGLEBOOKS_OK}))
@@ -147,7 +147,7 @@ def test_isbn_falls_back_to_google_books(clean_repo):
 
 def test_arxiv_id_verifies(clean_repo):
     note = set_csl(clean_repo, drop=["ISBN"], URL="https://arxiv.org/abs/2608.27454")
-    ok, method, _ = verify_refs.verify_note(
+    ok, method, _, _ = verify_refs.verify_note(
         note, repo_of(clean_repo), offline=False, mailto="me@example.org",
         transport=cassette(**{"arxiv.org": ARXIV_OK}))
     assert (ok, method) == (True, "arxiv")
@@ -155,10 +155,85 @@ def test_arxiv_id_verifies(clean_repo):
 
 def test_pubmed_pmid_verifies(clean_repo):
     note = set_csl(clean_repo, drop=["ISBN"], PMID="12345678")
-    ok, method, _ = verify_refs.verify_note(
+    ok, method, _, _ = verify_refs.verify_note(
         note, repo_of(clean_repo), offline=False, mailto="me@example.org",
         transport=cassette(**{"eutils.ncbi.nlm.nih.gov": PUBMED_OK}))
     assert (ok, method) == (True, "pubmed")
+
+
+# --- capture + identifier together (issue #7, finding 4) ----------------------
+
+def with_doi_and_capture(repo, doi="10.1145/3477132.3483540"):
+    """The fixture note keeps its raw capture AND gains a DOI."""
+    note = load(repo, f"reference/{REF_KEY}.md")
+    note.meta["csl_json"]["DOI"] = doi
+    note.save()
+    return load(repo, f"reference/{REF_KEY}.md")
+
+
+def test_capture_plus_confirmed_doi_upgrades_the_method(clean_repo):
+    note = with_doi_and_capture(clean_repo)
+    ok, method, source, id_check = verify_refs.verify_note(
+        note, repo_of(clean_repo), offline=False, mailto="me@example.org",
+        transport=cassette(**{"api.crossref.org": CROSSREF_OK}))
+    assert (ok, method, id_check) == (True, "raw-capture+crossref", "confirmed")
+    assert source == "https://doi.org/10.1145/3477132.3483540"
+
+
+def test_capture_with_rotted_doi_stays_verified_but_flags_it(clean_repo):
+    """The capture is the documented either/or basis, so verification holds --
+    but a DOI no registry knows must be visible, not silent."""
+    note = with_doi_and_capture(clean_repo, doi="10.9999/rotted")
+    ok, method, _, id_check = verify_refs.verify_note(
+        note, repo_of(clean_repo), offline=False, mailto="me@example.org",
+        transport=cassette(**{"api.crossref.org": CROSSREF_MISS,
+                              "openlibrary.org": OPENLIBRARY_MISS,
+                              "googleapis.com": GOOGLEBOOKS_MISS}))
+    assert (ok, method, id_check) == (True, "raw-capture", "failed")
+
+    verify_refs.run(repo_of(clean_repo), offline=False, mailto="me@example.org",
+                    transport=cassette(**{"api.crossref.org": CROSSREF_MISS,
+                                          "openlibrary.org": OPENLIBRARY_MISS,
+                                          "googleapis.com": GOOGLEBOOKS_MISS}),
+                    render=False)
+    saved = load(clean_repo, f"reference/{REF_KEY}.md")
+    assert saved.meta["verification"]["verified"] is True
+    assert saved.meta["verification"]["identifier_check"] == "failed"
+
+
+def test_offline_capture_never_attempts_a_lookup(clean_repo):
+    note = with_doi_and_capture(clean_repo)
+    transport = cassette()  # any call would raise NetworkUnavailable
+    ok, method, _, id_check = verify_refs.verify_note(
+        note, repo_of(clean_repo), offline=True, mailto="", transport=transport)
+    assert (ok, method, id_check) == (True, "raw-capture", "")
+
+
+# --- write-only-on-change (issue #7, finding 3) --------------------------------
+
+def test_second_run_over_an_unchanged_repo_writes_nothing(clean_repo):
+    """Unconditional saves made every cycle a diff on every reference note."""
+    run_script("verify_refs.py", clean_repo, "--offline")
+    ref = clean_repo / "reference" / f"{REF_KEY}.md"
+    first = ref.read_bytes()
+    first_date = load(clean_repo, f"reference/{REF_KEY}.md").meta["verification"]["date"]
+
+    run_script("verify_refs.py", clean_repo, "--offline")
+    assert ref.read_bytes() == first, "an unchanged state must not be rewritten"
+    assert load(clean_repo, f"reference/{REF_KEY}.md") \
+        .meta["verification"]["date"] == first_date
+
+
+def test_a_state_change_still_writes_and_stamps_a_fresh_date(clean_repo):
+    run_script("verify_refs.py", clean_repo, "--offline")
+    note = load(clean_repo, f"reference/{REF_KEY}.md")
+    note.meta["verification"] = {"method": "", "source": "",
+                                 "verified": False, "date": ""}
+    note.save()
+    run_script("verify_refs.py", clean_repo, "--offline")
+    saved = load(clean_repo, f"reference/{REF_KEY}.md")
+    assert saved.meta["verification"]["verified"] is True
+    assert saved.meta["verification"]["date"] != ""
 
 
 # --- graceful degradation (NFR-5) ---------------------------------------------

@@ -40,6 +40,52 @@ def now() -> str:
     return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _identifier_lookup(csl: dict, *, mailto: str, transport) -> tuple[str, str] | None:
+    """Try the authoritative registries for any identifier ``csl`` carries.
+
+    Returns ``(method, source)`` on a confirmed hit, ``("", "")`` when
+    identifiers exist but none confirmed, or ``None`` when there is nothing
+    to look up. NetworkUnavailable propagates so callers can degrade (NFR-5).
+    """
+    saw_identifier = False
+
+    doi = str(csl.get("DOI") or "").strip()
+    if doi:
+        saw_identifier = True
+        url = CROSSREF.format(doi=quote(doi, safe="/"), mailto=quote(mailto))
+        data = http.get_json(url, transport=transport)
+        if data and (data.get("message") or {}).get("DOI"):
+            return "crossref", f"https://doi.org/{doi}"
+
+    arxiv_id = _arxiv_id(csl)
+    if arxiv_id:
+        saw_identifier = True
+        url = ARXIV.format(arxiv_id=quote(arxiv_id))
+        resp = _raw(url, transport)
+        if resp and "<entry>" in resp and "<title>" in resp:
+            return "arxiv", f"https://arxiv.org/abs/{arxiv_id}"
+
+    pmid = str(csl.get("PMID") or "").strip()
+    if pmid:
+        saw_identifier = True
+        data = http.get_json(PUBMED.format(pmid=quote(pmid)), transport=transport)
+        result = (data or {}).get("result") or {}
+        if pmid in result:
+            return "pubmed", f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+
+    isbn = str(csl.get("ISBN") or "").replace("-", "").strip()
+    if isbn:
+        saw_identifier = True
+        data = http.get_json(OPENLIBRARY.format(isbn=quote(isbn)), transport=transport)
+        if data and f"ISBN:{isbn}" in data:
+            return "openlibrary", f"https://openlibrary.org/isbn/{isbn}"
+        data = http.get_json(GOOGLEBOOKS.format(isbn=quote(isbn)), transport=transport)
+        if data and int(data.get("totalItems") or 0) > 0:
+            return "googlebooks", f"https://www.googleapis.com/books/v1/volumes?q=isbn:{isbn}"
+
+    return ("", "") if saw_identifier else None
+
+
 def verify_note(
     note: Note,
     repo: ContentRepo,
@@ -47,52 +93,45 @@ def verify_note(
     offline: bool,
     mailto: str,
     transport=http.requests_transport,
-) -> tuple[bool, str, str]:
-    """Return ``(verified, method, source)`` for one reference note."""
+) -> tuple[bool, str, str, str]:
+    """Return ``(verified, method, source, identifier_check)`` for one note.
+
+    A raw capture verifies on its own, but it used to also END the check, so
+    a wrong or rotted DOI on a captured source was never caught (issue #7).
+    Now, when both a capture and an identifier are present and the network is
+    up, the identifier is checked too: a hit upgrades the method to
+    ``raw-capture+<registry>``, a definitive miss keeps the capture-based
+    verification (the documented either/or) but records
+    ``identifier_check: failed`` so the rot is visible instead of silent.
+    """
     capture = str(note.meta.get("raw_capture") or "").strip()
-    if capture:
-        path = repo.root / capture
-        if path.exists() and path.stat().st_size > 0:
-            return True, "raw-capture", capture
-
-    if offline:
-        return False, "", ""
-
     csl = note.meta.get("csl_json") or {}
     if not isinstance(csl, dict):
-        return False, "", ""
+        csl = {}
 
-    doi = str(csl.get("DOI") or "").strip()
-    if doi:
-        url = CROSSREF.format(doi=quote(doi, safe="/"), mailto=quote(mailto))
-        data = http.get_json(url, transport=transport)
-        if data and (data.get("message") or {}).get("DOI"):
-            return True, "crossref", f"https://doi.org/{doi}"
+    capture_ok = False
+    if capture:
+        path = repo.root / capture
+        capture_ok = path.exists() and path.stat().st_size > 0
 
-    arxiv_id = _arxiv_id(csl)
-    if arxiv_id:
-        url = ARXIV.format(arxiv_id=quote(arxiv_id))
-        resp = _raw(url, transport)
-        if resp and "<entry>" in resp and "<title>" in resp:
-            return True, "arxiv", f"https://arxiv.org/abs/{arxiv_id}"
+    if capture_ok:
+        if offline:
+            return True, "raw-capture", capture, ""
+        hit = _identifier_lookup(csl, mailto=mailto, transport=transport)
+        if hit is None:
+            return True, "raw-capture", capture, ""
+        method, source = hit
+        if method:
+            return True, f"raw-capture+{method}", source, "confirmed"
+        return True, "raw-capture", capture, "failed"
 
-    pmid = str(csl.get("PMID") or "").strip()
-    if pmid:
-        data = http.get_json(PUBMED.format(pmid=quote(pmid)), transport=transport)
-        result = (data or {}).get("result") or {}
-        if pmid in result:
-            return True, "pubmed", f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+    if offline:
+        return False, "", "", ""
 
-    isbn = str(csl.get("ISBN") or "").replace("-", "").strip()
-    if isbn:
-        data = http.get_json(OPENLIBRARY.format(isbn=quote(isbn)), transport=transport)
-        if data and f"ISBN:{isbn}" in data:
-            return True, "openlibrary", f"https://openlibrary.org/isbn/{isbn}"
-        data = http.get_json(GOOGLEBOOKS.format(isbn=quote(isbn)), transport=transport)
-        if data and int(data.get("totalItems") or 0) > 0:
-            return True, "googlebooks", f"https://www.googleapis.com/books/v1/volumes?q=isbn:{isbn}"
-
-    return False, "", ""
+    hit = _identifier_lookup(csl, mailto=mailto, transport=transport)
+    if hit and hit[0]:
+        return True, hit[0], hit[1], ""
+    return False, "", "", ""
 
 
 def _arxiv_id(csl: dict) -> str:
@@ -141,7 +180,7 @@ def run(repo: ContentRepo, *, offline: bool, mailto: str, transport=http.request
     for note in repo.notes(types=["reference"]):
         total += 1
         try:
-            ok, method, source = verify_note(
+            ok, method, source, id_check = verify_note(
                 note, repo, offline=offline, mailto=mailto, transport=transport)
         except http.NetworkUnavailable as exc:
             if not degraded:
@@ -149,18 +188,39 @@ def run(repo: ContentRepo, *, offline: bool, mailto: str, transport=http.request
                       "degrading to raw-capture verification only", file=sys.stderr)
                 repo.append_log("verify_refs: WARNING network unavailable, raw-capture only")
                 degraded = True
-            ok, method, source = verify_note(
+            ok, method, source, id_check = verify_note(
                 note, repo, offline=True, mailto=mailto, transport=transport)
 
-        note.meta["verification"] = {
+        old = dict(note.meta.get("verification") or {})
+        new = {
             "method": method,
             "source": source,
             "verified": bool(ok),
-            "date": now() if ok else "",
         }
-        if render:
-            rerender(note)
-        note.save()
+        if id_check:
+            new["identifier_check"] = id_check
+
+        # Only write when the verification STATE changed; a re-check that
+        # found the same state keeps the old date. Unconditional saves turned
+        # every cycle into a diff on every reference note and made `updated`
+        # stop meaning "last authored edit" (issue #7). `verification.date`
+        # is when this state was established, not when it was last re-checked.
+        state_changed = {k: old.get(k) for k in new} != new
+        if state_changed:
+            new["date"] = now() if ok else ""
+        else:
+            new["date"] = old.get("date", "")
+        note.meta["verification"] = new
+
+        rendered_changed = rerender(note) if render else False
+        if state_changed or rendered_changed:
+            note.save()
+
+        if id_check == "failed":
+            print(f"warning: {note.path.name}: raw capture verifies, but its "
+                  "identifier did not resolve at any registry -- check the "
+                  "DOI/ISBN for rot", file=sys.stderr)
+
         verified += int(ok)
         status = f"verified via {method}" if ok else "UNVERIFIED"
         print(f"{repo.rel(note.path)}\t{status}")

@@ -8,10 +8,12 @@
 #
 # The skill repo is public, so no token is required.
 #
-# IMPORTANT -- the result is CACHED per environment. The skill version freezes
-# at cache time: a fix pushed to the skill repo will NOT reach scheduled runs
-# until you edit this script (changing ZETTEL_SKILL_REF is enough). That is a
-# feature for stability and a trap for freshness. Pin a tag deliberately.
+# IMPORTANT -- the result is CACHED per environment, so this script alone
+# cannot keep the install current (a live session found it 12 commits stale,
+# issue #7). The cache is the BOOTSTRAP; currency comes from
+# `remote_cycle.sh refresh-skill`, which the remote maintenance prompt runs
+# before every cycle (fast-forward-only, to ZETTEL_SKILL_REF). Pin a tag
+# deliberately when you want runs frozen at a revision.
 
 set -euo pipefail
 
@@ -21,12 +23,32 @@ INSTALL_DIR="${ZETTEL_INSTALL_DIR:-/opt/zettel-skill}"
 
 echo "installing zettel-bootstrap from ${ZETTEL_SKILL_REPO}@${ZETTEL_SKILL_REF}"
 
-rm -rf "$INSTALL_DIR"
-git clone --depth 1 --branch "$ZETTEL_SKILL_REF" "$ZETTEL_SKILL_REPO" "$INSTALL_DIR"
+# Update-if-exists rather than re-clone: cheaper on a warm cache, and it is
+# the same ff-only mechanism refresh-skill uses at run time.
+if [[ -d "$INSTALL_DIR/.git" ]]; then
+  git -C "$INSTALL_DIR" fetch -q origin "$ZETTEL_SKILL_REF" \
+    && git -C "$INSTALL_DIR" checkout -q -B "$ZETTEL_SKILL_REF" FETCH_HEAD \
+    || { echo "warning: could not update ${INSTALL_DIR}; re-cloning" >&2
+         rm -rf "$INSTALL_DIR"; }
+fi
+if [[ ! -d "$INSTALL_DIR/.git" ]]; then
+  rm -rf "$INSTALL_DIR"
+  git clone --depth 1 --branch "$ZETTEL_SKILL_REF" "$ZETTEL_SKILL_REPO" "$INSTALL_DIR"
+fi
+SKILL_REV="$(git -C "$INSTALL_DIR" rev-parse --short HEAD)"
+echo "zettel-bootstrap at revision ${SKILL_REV}"
 
 # Make the skill discoverable to the session.
 mkdir -p "$HOME/.claude/skills"
 ln -sfn "$INSTALL_DIR/skills/zettel-bootstrap" "$HOME/.claude/skills/zettel-bootstrap"
+
+# Register the agent definitions too. Without this, a remote session has NONE
+# of the eight named agents the maintenance prompts delegate to -- the live
+# session had to improvise the critic gate from prose (issue #7, finding 8).
+mkdir -p "$HOME/.claude/agents"
+for agent in "$INSTALL_DIR"/agents/*.md; do
+  ln -sfn "$agent" "$HOME/.claude/agents/$(basename "$agent")"
+done
 
 # Deliberately NOT upgrading pip: on Debian-based images the system pip has no
 # RECORD file and `pip install --upgrade pip` hard-fails the whole setup.
@@ -40,8 +62,10 @@ python3 -m pip install --quiet -r "$INSTALL_DIR/requirements.txt"
   || { echo "error: SKILL.md missing from ${INSTALL_DIR} -- wrong ref '${ZETTEL_SKILL_REF}'?" >&2; exit 1; }
 [[ -d "$INSTALL_DIR/agents" ]] \
   || { echo "error: agents/ missing from ${INSTALL_DIR}" >&2; exit 1; }
+[[ -e "$HOME/.claude/agents/critic.md" ]] \
+  || { echo "error: agent registration failed (no ~/.claude/agents/critic.md)" >&2; exit 1; }
 python3 "$INSTALL_DIR/scripts/lint_citations.py" --help >/dev/null
 python3 "$INSTALL_DIR/scripts/lint_links.py" --help >/dev/null
 python3 -c "import yaml, requests, networkx"
 
-echo "zettel-bootstrap ready at ${INSTALL_DIR} (ref ${ZETTEL_SKILL_REF})"
+echo "zettel-bootstrap ready at ${INSTALL_DIR} (${SKILL_REV}, ref ${ZETTEL_SKILL_REF})"

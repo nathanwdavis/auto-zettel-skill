@@ -179,7 +179,9 @@ What it does: acquires `run.lock` (a second concurrent run exits harmlessly),
 pulls, launches a headless run that reads INBOX first and dispatches the agent
 orchestra (orchestrator → researchers → synthesizers → note-maintainer →
 critic → librarian) in isolated worktrees, then **independently re-runs the
-gates and pushes only if they pass**. The model never pushes; the wrapper does.
+gates and pushes only if they pass**. In a session where a named agent is not
+registered, the session adopts that role itself from `agents/<name>.md` and
+logs the step as self-review — the critic gate runs either way. The model never pushes; the wrapper does.
 Budget and turn caps come from config.yml. Add `--dry-run` to do everything
 except the push.
 

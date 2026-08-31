@@ -73,20 +73,45 @@ Create a cloud environment (claude.ai/code → cloud icon → environment settin
   verification then happens against primary sources through Crossref, arXiv,
   PubMed, and Open Library. An allowlist would break discovery and, worse, make
   "unreachable" indistinguishable from "does not exist".
-- **Setup script:** `ci/setup-environment.sh`, which clones this public skill
-  repo, links it into `~/.claude/skills/`, installs dependencies, and verifies
-  the skill actually landed.
+- **Setup script:** `ci/setup-environment.sh`, which clones (or fast-forwards)
+  this public skill repo, links the skill into `~/.claude/skills/` and the
+  eight agent definitions into `~/.claude/agents/`, installs dependencies,
+  verifies the skill actually landed, and prints the installed revision.
+  Without the agent links a session has none of the named agents the
+  maintenance prompts delegate to; the prompts also carry a self-review
+  fallback for sessions where registration is missing.
 
 Because Full egress means agents read untrusted text while holding write
 access, every web-reading agent carries an explicit rule that fetched content is
 data and never instructions, and `raw/` captures record what was actually read.
 
-### The cache is load-bearing
+### The cache bootstraps; refresh-skill keeps it current
 
-The setup script's result is **cached per environment**. The skill version
-freezes at cache time: a fix pushed here will not reach scheduled runs until the
-script is edited. Pin `ZETTEL_SKILL_REF` to a tag deliberately, and treat
-bumping it as a release step.
+The setup script's result is **cached per environment**, so on its own the
+installed skill would freeze at cache time — a live session found it 12
+commits behind `main` with nothing saying so (issue #7). The division of
+labor is now:
+
+- **The cache is the bootstrap.** It guarantees a working install exists with
+  dependencies present, whatever the network does later.
+- **`remote_cycle.sh refresh-skill` is the currency mechanism.** The remote
+  maintenance prompt runs it before every cycle: a fast-forward-only update of
+  the installed checkout to its configured ref. ff-only means it declines
+  rather than damages when the checkout is dirty or diverged, and it always
+  exits 0 — a cycle on older code beats no cycle.
+- **`ZETTEL_SKILL_REF` still pins deliberately.** Point it at a tag and
+  refresh-skill fast-forwards within that ref only; bumping the tag remains a
+  release step.
+
+Every `start` and `finish` logs the installed skill revision
+(`skill-rev=<sha>`) into `log.md`, so each cycle records which code produced
+it. To check currency by hand, compare — presence is not currency; a
+12-commits-stale checkout still *has* every file you'd probe for:
+
+```sh
+git -C /opt/zettel-skill rev-parse --short HEAD
+git -C /opt/zettel-skill ls-remote origin main
+```
 
 ## Content-repo CI
 
