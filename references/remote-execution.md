@@ -99,6 +99,16 @@ labor is now:
   the installed checkout to its configured ref. ff-only means it declines
   rather than damages when the checkout is dirty or diverged, and it always
   exits 0 — a cycle on older code beats no cycle.
+- **`start` refreshes on its own too, because prompts freeze.** A Routine
+  stores its prompt at creation time, so a prompt-template fix (like the line
+  above) never reaches Routines that already exist. The sandbox repo's PR #6
+  proved the cost: a cycle fired with a pre-refresh prompt ran a stale cached
+  install and silently regenerated `manifest.json` without its `inquiries`
+  block. `remote_cycle.sh start` now runs the same ff-only refresh itself and,
+  if HEAD moved, re-execs the refreshed script — so any Routine that reaches
+  `start` runs current code, whatever its stored prompt says. Existing
+  Routines created before *this* fix still run a stale `start`, so update or
+  recreate them once; from then on the property holds structurally.
 - **`ZETTEL_SKILL_REF` still pins deliberately.** Point it at a tag and
   refresh-skill fast-forwards within that ref only; bumping the tag remains a
   release step.
@@ -116,10 +126,23 @@ git -C /opt/zettel-skill ls-remote origin main
 ## Content-repo CI
 
 Copy `ci/content-repo-gates.yml` into the content repo as
-`.github/workflows/gates.yml`, then make **gates** a required status check on
-`main` (Settings → Branches → branch protection). Without that protection rule
-the workflow still runs, but nothing enforces its result — the guarantee comes
-from the required check, not from the workflow existing.
+`.github/workflows/gates.yml`, then apply the repo settings that make it
+mean something. All three are one-time manual steps on the content repo:
+
+1. **Make `gates` a required status check on `main`** (Settings → Branches →
+   branch protection rule, or a ruleset). Without it the workflow still runs,
+   but nothing enforces its result — a red PR merges on a click, which is how
+   the sandbox repo's PR #6 reached main with its manifest check failing. The
+   guarantee comes from the required check, not from the workflow existing.
+2. **Allow auto-merge** (Settings → General → Pull Requests). Runs arm
+   auto-merge on the PRs they open — `gh pr merge --auto` where `gh` exists,
+   the GitHub MCP tools otherwise — so a PR merges exactly when the required
+   check goes green, and a session never has to (and never may) merge one.
+   Auto-merge without rule 1 is meaningless: with no required check it merges
+   immediately, red or not.
+3. **Automatically delete head branches** (same page) — sessions cannot
+   delete remote branches through the git proxy, so merged `zettel/run-*`
+   branches otherwise accumulate forever.
 
 CI runs `verify_refs.py --offline` on purpose. It re-checks what the run
 recorded against the captures committed to `raw/`, so a gate can never pass

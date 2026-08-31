@@ -8,7 +8,7 @@
 # content repo decides whether it may reach main. Nothing here can bypass that.
 #
 # Subcommands:
-#   start   claim the distributed lock, pull, create the run branch
+#   start   refresh this skill checkout, claim the lock, create the run branch
 #   finish  commit, push the branch, open a PR, enable auto-merge
 #   abort   release the lock, leave the branch for inspection
 #   status  report lock holder and current branch
@@ -31,12 +31,13 @@ usage() {
   cat <<'USAGE'
 Usage: remote_cycle.sh <start|finish|abort|status|refresh-skill> --repo <content-repo> [options]
 
-  start   --repo <path> [--ttl <hours>]   claim lock, pull, create run branch
+  start   --repo <path> [--ttl <hours>]   refresh this skill checkout, claim
+                                          lock, pull, create run branch
   finish  --repo <path> [--title <text>]  commit, push branch, open PR, auto-merge
   abort   --repo <path>                   release the lock, keep the branch
   status  --repo <path>                   report lock holder and branch
   refresh-skill                           fast-forward this skill checkout itself
-                                          (run BEFORE start; takes no --repo)
+                                          (start also does this; takes no --repo)
 
 Exit codes: 0 ok; 3 lock held by a live run (not an error -- stand down); 1 failure.
 USAGE
@@ -56,36 +57,44 @@ done
 
 if [[ "$CMD" == "help" ]]; then usage; exit 0; fi
 
-if [[ "$CMD" == "refresh-skill" ]]; then
-  # Fast-forward the checkout this script lives in, so a scheduled run picks
-  # up fixes without waiting for the environment cache to be rebuilt (issue
-  # #7: the cached install was found 12 commits stale, silently). ff-only is
-  # the safety property that makes auto-refresh acceptable: it structurally
-  # cannot damage a dirty or diverged developer checkout -- it just declines.
-  # Always exit 0: refresh is advisory, and a cycle on current-but-older code
-  # beats no cycle at all.
+# Fast-forward the checkout this script lives in, so a scheduled run picks
+# up fixes without waiting for the environment cache to be rebuilt (issue
+# #7: the cached install was found 12 commits stale, silently). ff-only is
+# the safety property that makes auto-refresh acceptable: it structurally
+# cannot damage a dirty or diverged developer checkout -- it just declines.
+# Never fails the caller: refresh is advisory, and a cycle on
+# current-but-older code beats no cycle at all. Leaves the before/after
+# revisions in SKILL_BEFORE/SKILL_AFTER so `start` can tell whether the
+# file it is running from was just replaced.
+refresh_skill_checkout() {
   SKILL_ROOT_LOCAL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   REV() { git -C "$SKILL_ROOT_LOCAL" rev-parse --short HEAD 2>/dev/null || echo unknown; }
-  BEFORE="$(REV)"
+  SKILL_BEFORE="$(REV)"
+  SKILL_AFTER="$SKILL_BEFORE"
   SKILL_BRANCH="$(git -C "$SKILL_ROOT_LOCAL" branch --show-current 2>/dev/null || true)"
   if [[ -z "$SKILL_BRANCH" ]]; then
-    echo "skill checkout at $BEFORE is detached or not a git repo; not refreshing"
-    exit 0
+    echo "skill checkout at $SKILL_BEFORE is detached or not a git repo; not refreshing"
+    return 0
   fi
   if ! git -C "$SKILL_ROOT_LOCAL" fetch -q origin "$SKILL_BRANCH" 2>/dev/null; then
-    echo "warning: could not fetch skill origin; staying at $BEFORE" >&2
-    exit 0
+    echo "warning: could not fetch skill origin; staying at $SKILL_BEFORE" >&2
+    return 0
   fi
   if git -C "$SKILL_ROOT_LOCAL" merge --ff-only -q FETCH_HEAD >/dev/null 2>&1; then
-    AFTER="$(REV)"
-    if [[ "$BEFORE" == "$AFTER" ]]; then
-      echo "skill already current at $AFTER ($SKILL_BRANCH)"
+    SKILL_AFTER="$(REV)"
+    if [[ "$SKILL_BEFORE" == "$SKILL_AFTER" ]]; then
+      echo "skill already current at $SKILL_AFTER ($SKILL_BRANCH)"
     else
-      echo "skill refreshed: $BEFORE -> $AFTER ($SKILL_BRANCH)"
+      echo "skill refreshed: $SKILL_BEFORE -> $SKILL_AFTER ($SKILL_BRANCH)"
     fi
   else
-    echo "warning: skill checkout at $BEFORE cannot fast-forward (dirty or diverged); staying put" >&2
+    echo "warning: skill checkout at $SKILL_BEFORE cannot fast-forward (dirty or diverged); staying put" >&2
   fi
+  return 0
+}
+
+if [[ "$CMD" == "refresh-skill" ]]; then
+  refresh_skill_checkout
   exit 0
 fi
 
@@ -150,6 +159,23 @@ print(f"lock: {info.holder} (session {info.session}, {info.age_hours():.2f}h old
     ;;
 
   start)
+    # Freshness must not depend on the prompt asking for it: a Routine stores
+    # its prompt at creation time, so prompt-template fixes never reach
+    # existing Routines -- the sandbox repo's PR #6 ran a months-newer prompt's
+    # cycle on a stale cached install for exactly this reason and silently
+    # regenerated the manifest without its inquiries block. If the refresh
+    # moved HEAD, re-exec the refreshed file: the exec is a process boundary,
+    # so bash never keeps reading a script that changed under it, and the env
+    # guard makes a second refresh (and thus a loop) impossible. Messages go
+    # to stderr because callers read the run branch from start's stdout.
+    if [[ -z "${ZETTEL_SKILL_REFRESHED:-}" ]]; then
+      refresh_skill_checkout >&2
+      if [[ "$SKILL_BEFORE" != "$SKILL_AFTER" ]]; then
+        ZETTEL_SKILL_REFRESHED=1 exec "$SCRIPT_DIR/remote_cycle.sh" start \
+          --repo "$REPO" --ttl "$TTL"
+      fi
+    fi
+
     # Break a provably stale lock, then claim. A LIVE lock is never stolen:
     # two sessions researching the same inquiry pay for it twice.
     lockpy '
@@ -250,6 +276,13 @@ print("yes" if ok else f"no\t{holder.holder}\t{holder.session}\t{holder.age_hour
     # the pushed branch; everything after the commit reports to stdout only
     # (a post-commit log line can never reach the branch it describes).
     log "remote_cycle: finish $BRANCH (skill-rev=$(skill_rev); lock released after push)"
+
+    # When the PR handoff falls to the session, the script writes the record
+    # itself: agents paraphrasing it produced "(gh unavailable)", which a
+    # reviewer read as GitHub being down rather than the CLI being absent.
+    if ! command -v gh >/dev/null 2>&1; then
+      log "remote_cycle: PR for $BRANCH must be opened by the session (GitHub CLI not installed in this container)"
+    fi
 
     git -C "$REPO" add -A
     if ! git -C "$REPO" diff --cached --quiet; then

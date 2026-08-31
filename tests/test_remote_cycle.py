@@ -9,6 +9,7 @@ whether it reaches main.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 
@@ -41,7 +42,12 @@ def content_repo(tmp_path):
 
 
 def cycle(repo, *args, holder="test-run"):
-    env = {**os.environ, "PYTHON": sys.executable, "ZETTEL_RUN_HOLDER": holder}
+    # ZETTEL_SKILL_REFRESHED tells start its self-refresh already ran: these
+    # tests run the REAL dev checkout's script, and a refresh here would fetch
+    # from GitHub and fast-forward the developer's working copy. The refresh
+    # path is exercised against throwaway installs in the refresh tests below.
+    env = {**os.environ, "PYTHON": sys.executable, "ZETTEL_RUN_HOLDER": holder,
+           "ZETTEL_SKILL_REFRESHED": "1"}
     return subprocess.run([str(SCRIPT), *args, "--repo", str(repo)],
                           capture_output=True, text=True, env=env)
 
@@ -298,16 +304,21 @@ def test_every_step_is_logged_with_the_skill_revision(content_repo):
 
 # --- refresh-skill (issue #7, finding 7) --------------------------------------
 
-def _fake_skill_install(tmp_path):
+def _fake_skill_install(tmp_path, with_lib=False):
     """A throwaway 'skill repo' containing the real script, plus its clone.
 
     refresh-skill updates the checkout the SCRIPT lives in, so exercising it
     against the real dev repo would fetch from GitHub and race real branches.
+    with_lib also copies zettel_lib so `start` can run all the way through.
     """
     src = tmp_path / "skill-src"
     (src / "scripts").mkdir(parents=True)
     (src / "scripts" / "remote_cycle.sh").write_bytes(SCRIPT.read_bytes())
     (src / "scripts" / "remote_cycle.sh").chmod(0o755)
+    if with_lib:
+        shutil.copytree(PLUGIN_ROOT / "scripts" / "zettel_lib",
+                        src / "scripts" / "zettel_lib",
+                        ignore=shutil.ignore_patterns("__pycache__"))
     git = ["git", "-C", str(src)]
     subprocess.run(git + ["init", "-q", "-b", "main"], check=True)
     for key, value in (("user.name", "t"), ("user.email", "t@localhost")):
@@ -367,6 +378,67 @@ def test_refresh_skill_is_a_noop_when_current(tmp_path):
                              "refresh-skill"], capture_output=True, text=True)
     assert result.returncode == 0
     assert "already current" in result.stdout
+
+
+def test_start_self_refreshes_and_runs_the_refreshed_code(content_repo, tmp_path):
+    """A Routine stores its prompt at creation time, so a prompt telling the
+    agent to refresh never reaches existing Routines -- the sandbox repo's
+    PR #6 regenerated the manifest on a stale install for exactly that reason.
+    start must therefore refresh on its own, and the code that continues the
+    run must be the REFRESHED code: upstream here replaces the script with a
+    sentinel stub, which only prints if start re-execs the new file."""
+    repo, _ = content_repo
+    src, install = _fake_skill_install(tmp_path)
+    stub = src / "scripts" / "remote_cycle.sh"
+    stub.write_text("#!/usr/bin/env bash\necho REFRESHED-CODE-RAN \"$@\"\n",
+                    encoding="utf-8")
+    subprocess.run(["git", "-C", str(src), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(src), "commit", "-qm", "v2 stub"], check=True)
+
+    env = {**os.environ, "PYTHON": sys.executable}
+    env.pop("ZETTEL_SKILL_REFRESHED", None)
+    result = subprocess.run([str(install / "scripts" / "remote_cycle.sh"),
+                             "start", "--repo", str(repo)],
+                            capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+    assert "skill refreshed:" in result.stderr, "refresh chatter belongs on stderr"
+    assert "REFRESHED-CODE-RAN start" in result.stdout
+    assert _head(install) == _head(src)
+
+
+def test_start_on_a_current_install_proceeds_without_reexec(content_repo, tmp_path):
+    """The fall-through wiring: no upstream movement means no exec, and start
+    carries on to create the run branch in the same process."""
+    repo, _ = content_repo
+    _, install = _fake_skill_install(tmp_path, with_lib=True)
+    env = {**os.environ, "PYTHON": sys.executable, "ZETTEL_RUN_HOLDER": "fresh-run"}
+    env.pop("ZETTEL_SKILL_REFRESHED", None)
+    result = subprocess.run([str(install / "scripts" / "remote_cycle.sh"),
+                             "start", "--repo", str(repo)],
+                            capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+    assert "already current" in result.stderr
+    assert result.stdout.strip().startswith("zettel/run-"), \
+        "stdout must still be only the branch (callers capture it)"
+    assert gitlock.read(repo) is not None
+
+
+@pytest.mark.skipif(shutil.which("gh") is not None,
+                    reason="gh installed here; the no-gh handoff branch cannot run")
+def test_finish_without_gh_logs_the_canonical_handoff_line(content_repo):
+    """The PR-handoff record is script-emitted, pre-commit: agents paraphrasing
+    it wrote '(gh unavailable)', which review read as GitHub being down."""
+    repo, _ = content_repo
+    cycle(repo, "start")
+    (repo / "INBOX.md").write_text("# Inbox\n\nhandoff work\n", encoding="utf-8")
+    result = cycle(repo, "finish")
+    assert result.returncode == 0, result.stderr
+
+    canonical = "GitHub CLI not installed in this container"
+    committed = subprocess.run(["git", "-C", str(repo), "show", "HEAD:log.md"],
+                               capture_output=True, text=True, check=True).stdout
+    assert canonical in committed, "the line must land ON the pushed branch"
+    assert "PUSHED_BRANCH=" in result.stdout
 
 
 def test_help_and_bad_subcommand(content_repo):
