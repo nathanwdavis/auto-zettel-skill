@@ -4,10 +4,11 @@ A Claude Code plugin that scaffolds and perpetually grows a **citation-grounded
 Zettelkasten** knowledge repository on GitHub. Every sourced claim traces to a
 verified reference; notes that cannot be grounded fail a lint and never land.
 
-> **Status: Phase 3.5 of 4** — substrate, citation gates, the agent orchestra,
+> **Status: Phase 3.6 of 4** — substrate, citation gates, the agent orchestra,
 > scheduled maintenance (laptop cron *and* fully remote via Routines + CI
-> gating), two-mode access, and the serendipity sweep. Skill emergence
-> (Phase 4) remains. See [`PLAN.md`](PLAN.md).
+> gating), two-mode access, the serendipity sweep, and human capture with
+> tracked inquiries and ad-hoc research. Skill emergence (Phase 4) remains.
+> See [`PLAN.md`](PLAN.md).
 
 ## Two repositories
 
@@ -192,14 +193,23 @@ agents/                      the 8 subagent definitions
 scripts/                     genesis, capture, maintenance, manifest, verification, lints
   zettel_lib/                shared library (see note below)
   csl/                       bundled Chicago style + provenance
+ci/                          content-repo gate workflow + cloud env setup
 tests/                       pytest suite and cassettes
+.claude/CLAUDE.md            guidance for developing the skill itself
 docs/REQUIREMENTS.md         the specification, with amendments
+PLAN.md                      phase status and build order
 ```
 
 `scripts/zettel_lib/` is an addition to the layout the spec prescribes: the
-four Python scripts share frontmatter parsing, note naming, repo access, HTTP,
-and citation rendering, and duplicating those across four entry points would
-guarantee they drift.
+Python entry points share frontmatter parsing, note naming, repo access, HTTP,
+citation rendering, similarity scoring, and the git lock, and duplicating those
+across thirteen entry points would guarantee they drift.
+
+## Working on the skill itself
+
+[`.claude/CLAUDE.md`](.claude/CLAUDE.md) has the conventions, the environment's sharp edges,
+and the one invariant that governs every change: never make a gate pass by
+weakening it.
 
 ## Tests
 
@@ -208,7 +218,13 @@ pip install -r requirements-dev.txt
 ./smoke_test.sh
 ```
 
-`smoke_test.sh` runs the full pytest suite plus an end-to-end genesis scaffold.
+`smoke_test.sh` runs the full pytest suite (280 tests) plus an end-to-end
+genesis scaffold. To run pytest alone, use the virtualenv's interpreter —
+`pytest` is generally not installed in the system python:
+
+```sh
+.venv/bin/python -m pytest -q
+```
 
 Two acceptance checks cannot run in a sandboxed or offline environment and are
 **manual steps on a networked machine**:
