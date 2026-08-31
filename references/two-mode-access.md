@@ -35,6 +35,11 @@ Belt and suspenders — five paths, in order of preference:
 5. **Claude Code WebFetch**: on the Claude Code surface, fetch manifest URLs
    directly (domain permissions apply).
 
+> **If the content repo is public** — the default for this project — Mode B is
+> much simpler: `manifest.json` carries anonymous `raw.githubusercontent.com`
+> URLs, so paths 2 and 3 work with no token and no connector. The rules below
+> apply only when the content repo is private.
+
 ### Private content repos: the hard rule
 
 Anonymous `raw.githubusercontent.com` URLs for a private repo return 404.

@@ -43,6 +43,17 @@ Caveat: desktop/Cowork tasks run **only while the app is open**. For unattended
 cadence, cron (or a launchd/systemd timer wrapping the same script) is the
 reliable option.
 
+## Scheduled remote sessions (no laptop)
+
+The fully unattended path: a Routine fires a fresh remote Claude Code session on
+a configured cloud environment, which runs the cycle and hands a PR to CI. No
+machine of yours needs to be awake. Setup, guarantees, and trade-offs are in
+[`remote-execution.md`](remote-execution.md).
+
+Prefer this over cron when you want maintenance to keep running while your
+laptop is closed. Prefer cron when you want a hard per-run dollar cap, which
+only the nested `claude -p` path provides.
+
 ## Cloud sessions and claude.ai (Mode B)
 
 Cloud and Cowork-cloud sessions do **not** read `~/.claude/skills/` on your
