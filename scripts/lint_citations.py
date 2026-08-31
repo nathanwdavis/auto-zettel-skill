@@ -30,6 +30,13 @@ from zettel_lib.repo import ContentRepo, ContentRepoError
 WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]")
 CONTESTED_MIN_SOURCES = 3
 
+# QA-3 tiers, strongest first. Researchers may reach any source to *find* a
+# claim; a note grounded only in general web has been discovered but not yet
+# verified against a primary source. That is a normal, temporary state -- so it
+# warns rather than blocks.
+STRONG_TIERS = {"peer-reviewed", "primary-text", "reputable-secondary"}
+WEAK_TIER = "general-web"
+
 # A permanent note makes a "sourced claim" when it cites, quotes, or attributes.
 SOURCED_CLAIM = re.compile(
     r"(\baccording to\b|\bargues\b|\bshows that\b|\bfound that\b|\breports\b"
@@ -62,6 +69,7 @@ def lint(repo: ContentRepo) -> tuple[list[Violation], list[str]]:
 
     for note in (n for n in notes if n.type == "permanent"):
         violations.extend(_lint_permanent(repo, note, by_key, id_to_key, verified_refs))
+        warnings.extend(_check_sourcing_strength(repo, note, by_key, id_to_key, verified_refs))
 
     return violations, warnings
 
@@ -141,6 +149,32 @@ def _lint_permanent(repo, note, by_key, id_to_key, verified_refs) -> list[Violat
             f"note is tagged 'contested' but links to {len(verified_linked)} verified "
             f"reference(s); {CONTESTED_MIN_SOURCES} independent sources required"))
     return out
+
+
+def _check_sourcing_strength(repo, note, by_key, id_to_key, verified_refs) -> list[str]:
+    """Warn when a permanent note rests only on general-web sources (QA-3).
+
+    Not a violation: general web is sometimes genuinely the primary source, and
+    a lead found on the open web is exactly how research is meant to start. But
+    a note that never reached a stronger tier is a visible backlog item, not a
+    finished one.
+    """
+    targets = {str(l.get("target_id", "")) for l in note.links}
+    targets |= {m.group(1) for m in WIKILINK.finditer(note.body)}
+    resolved = {id_to_key.get(t, t) for t in targets}
+    linked = [by_key[k] for k in resolved
+              if k in by_key and by_key[k].type == "reference" and k in verified_refs]
+    if not linked:
+        return []
+
+    tiers = {str(ref.meta.get("source_tier") or "").strip() for ref in linked}
+    if tiers & STRONG_TIERS:
+        return []
+    if not tiers or tiers == {WEAK_TIER}:
+        return [f"{repo.rel(note.path)}: weak-sourcing -- grounded only in "
+                f"{WEAK_TIER} sources; verify against a primary or peer-reviewed "
+                f"source to finish grounding this claim"]
+    return []
 
 
 def _norm(text: str) -> str:
