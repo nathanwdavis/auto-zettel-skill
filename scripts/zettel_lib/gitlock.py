@@ -140,13 +140,21 @@ def claim(repo: Path, holder: str, session: str = "",
         f"push access failure, not contention: {push.stderr.strip()[:400]}")
 
 
-def release(repo: Path, remote: str = "origin") -> None:
-    """Commit the lock file's removal. Safe when the lock is already free."""
+def release(repo: Path, remote: str = "origin", *, reason: str = "") -> None:
+    """Commit the lock file's removal. Safe when the lock is already free.
+
+    ``reason`` goes into the release commit's message on the pushed lock
+    branch. It exists because a failed start and a healthy no-op cycle were
+    indistinguishable from the repo (issue #7): a no-op push nothing, and a
+    crashed start's trap released silently. The lock branch's history is the
+    one pushed artifact every cycle touches, so the reason lives there.
+    """
+    message = "lock: release" + (f" ({reason})" if reason else "")
     for _attempt in range(2):  # one retry: release races are benign
         tip = _remote_tip(repo, remote)
         if tip is None or _info_at(repo, tip, remote) is None:
             return
-        push = _push_state(repo, remote, tip, None, "lock: release")
+        push = _push_state(repo, remote, tip, None, message)
         if push.returncode == 0:
             return
     raise GitLockError("could not release the lock after retry")
@@ -164,5 +172,5 @@ def break_stale(repo: Path, ttl_hours: float = DEFAULT_TTL_HOURS,
         return None
     if info.age_hours() < ttl_hours:
         return None
-    release(repo, remote)
+    release(repo, remote, reason=f"stale-broken, was {info.holder}")
     return info

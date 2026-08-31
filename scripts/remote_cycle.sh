@@ -62,6 +62,42 @@ log() { echo "- \`$(STAMP)\` $*" >> "$REPO/log.md"; }
 HOLDER="${ZETTEL_RUN_HOLDER:-remote-session}"
 SESSION="${CLAUDE_SESSION_ID:-${ZETTEL_SESSION_ID:-unknown}}"
 
+SKILL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Every cycle records which skill revision produced it (issue #7): a stale
+# cached install is otherwise invisible, and a bug report from a run cannot
+# be attributed to a revision.
+skill_rev() { git -C "$SKILL_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown; }
+
+# Resolve the content repo's default branch WITHOUT assuming the local clone
+# has refs/remotes/origin/HEAD -- a Claude Code remote-session clone does not,
+# and under `set -euo pipefail` a bare `git symbolic-ref` there exits 128 and
+# killed every scheduled run before any fallback could apply (issue #7, P0).
+# Ask the remote first, so a repo whose default branch is not `main` resolves
+# correctly too; the `|| true` inside each substitution is what keeps a miss
+# non-fatal.
+default_branch() {
+  local db
+  db="$(git -C "$REPO" ls-remote --symref origin HEAD 2>/dev/null \
+    | awk '/^ref:/ {sub("refs/heads/","",$2); print $2; exit}' || true)"
+  [[ -n "$db" ]] || db="$(git -C "$REPO" symbolic-ref --short \
+    refs/remotes/origin/HEAD 2>/dev/null | sed 's|origin/||' || true)"
+  echo "${db:-main}"
+}
+
+# Release the distributed lock, recording WHY on the lock branch. The reason
+# is the one artifact that distinguishes a failed start from a healthy no-op
+# cycle from outside the session (issue #7 comment): the lock branch is
+# pushed either way, log.md only when a cycle has work.
+release_lock() {
+  PYTHONPATH="$SCRIPT_DIR" "$PYBIN" -c '
+import sys
+sys.path.insert(0, "'"$SCRIPT_DIR"'")
+from pathlib import Path
+from zettel_lib import gitlock
+gitlock.release(Path(sys.argv[1]), reason=sys.argv[2])
+' "$REPO" "${1:-}"
+}
+
 lockpy() { PYTHONPATH="$SCRIPT_DIR" "$PYBIN" -c "$1" "$REPO" "${@:2}"; }
 
 case "$CMD" in
@@ -117,14 +153,10 @@ print("yes" if ok else f"no\t{holder.holder}\t{holder.session}\t{holder.age_hour
       echo "lock held by ${h} (session ${s}, ${age}h old); standing down without work"
       exit 3
     fi
-    trap 'echo "start failed; releasing lock" >&2; PYTHONPATH="$SCRIPT_DIR" "$PYBIN" -c "
-import sys; sys.path.insert(0, \"$SCRIPT_DIR\")
-from pathlib import Path
-from zettel_lib import gitlock; gitlock.release(Path(\"$REPO\"))"' ERR
+    trap 'echo "start failed; releasing lock" >&2; release_lock "start-failed"' ERR
 
     git -C "$REPO" fetch -q origin
-    DEFAULT_BRANCH="$(git -C "$REPO" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|origin/||')"
-    DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
+    DEFAULT_BRANCH="$(default_branch)"
     git -C "$REPO" checkout -q "$DEFAULT_BRANCH"
     git -C "$REPO" pull -q --ff-only origin "$DEFAULT_BRANCH"
 
@@ -132,7 +164,7 @@ from zettel_lib import gitlock; gitlock.release(Path(\"$REPO\"))"' ERR
     git -C "$REPO" checkout -q -b "$BRANCH"
     trap - ERR
 
-    log "remote_cycle: start (holder=$HOLDER session=$SESSION branch=$BRANCH)"
+    log "remote_cycle: start (holder=$HOLDER session=$SESSION branch=$BRANCH skill-rev=$(skill_rev))"
     echo "$BRANCH"
     ;;
 
@@ -140,21 +172,43 @@ from zettel_lib import gitlock; gitlock.release(Path(\"$REPO\"))"' ERR
     BRANCH="$(git -C "$REPO" branch --show-current)"
     [[ "$BRANCH" == zettel/run-* ]] || die "not on a run branch (on '$BRANCH'); run 'start' first"
 
+    git -C "$REPO" fetch -q origin
+    DEFAULT_BRANCH="$(default_branch)"
+
     # Bookkeeping-only paths: a cycle that touched nothing else did no work.
     # Pushing it would open a PR every quiet week and drown the real ones.
     CHANGED="$(git -C "$REPO" status --porcelain --untracked-files=all \
       | awk '{print $NF}' | sort -u)"
     SUBSTANTIVE="$(printf '%s\n' "$CHANGED" | grep -v '^log\.md$' | grep -v '^$' || true)"
-    AHEAD="$(git -C "$REPO" log "origin/${DEFAULT_BRANCH:-main}..HEAD" --oneline 2>/dev/null || true)"
+    AHEAD="$(git -C "$REPO" log "origin/${DEFAULT_BRANCH}..HEAD" --oneline 2>/dev/null || true)"
 
     if [[ -z "$SUBSTANTIVE" && -z "$AHEAD" ]]; then
       # Discard the start/finish log lines too: an empty cycle leaves no trace
-      # in the knowledge base, only in the session transcript.
+      # in the knowledge base -- the stand-down reason goes on the lock branch.
+      release_lock "empty-cycle"
       git -C "$REPO" checkout -q -- log.md 2>/dev/null || true
-      "$0" abort --repo "$REPO" >/dev/null
       echo "no changes this cycle; nothing pushed"
       exit 0
     fi
+
+    # A run branch whose work already merged (auto-merge squashes, so compare
+    # TREES, not ancestry alone) must not open an empty duplicate PR. This
+    # catches the common case -- re-finishing an old branch with no new work;
+    # a stale branch whose base has since moved still needs a human eye.
+    if [[ -z "$SUBSTANTIVE" ]] && { \
+         git -C "$REPO" merge-base --is-ancestor HEAD "origin/$DEFAULT_BRANCH" 2>/dev/null \
+         || [[ "$(git -C "$REPO" rev-parse "HEAD^{tree}")" == \
+               "$(git -C "$REPO" rev-parse "origin/$DEFAULT_BRANCH^{tree}")" ]]; }; then
+      release_lock "already-merged $BRANCH"
+      git -C "$REPO" checkout -q -- log.md 2>/dev/null || true
+      echo "this branch's work is already merged into $DEFAULT_BRANCH; nothing to push"
+      exit 0
+    fi
+
+    # The completion line is logged BEFORE the commit so it actually lands on
+    # the pushed branch; everything after the commit reports to stdout only
+    # (a post-commit log line can never reach the branch it describes).
+    log "remote_cycle: finish $BRANCH (skill-rev=$(skill_rev); lock released after push)"
 
     git -C "$REPO" add -A
     if ! git -C "$REPO" diff --cached --quiet; then
@@ -164,35 +218,35 @@ from zettel_lib import gitlock; gitlock.release(Path(\"$REPO\"))"' ERR
     fi
 
     git -C "$REPO" push -q -u origin "$BRANCH" || die "could not push $BRANCH"
-    log "remote_cycle: pushed $BRANCH ($(git -C "$REPO" rev-parse --short HEAD))"
+    echo "pushed $BRANCH ($(git -C "$REPO" rev-parse --short HEAD))"
 
     # The PR is the handoff to CI. Auto-merge means the session does not wait:
     # GitHub merges when the required gate check goes green, and never if it
-    # does not. gh is absent in remote containers, so this is best-effort and
-    # the branch + PR remain for a human or the GitHub MCP tools either way.
+    # does not. Without gh this is NOT a dead end -- a remote session usually
+    # has the GitHub MCP tools and should open the PR itself.
     if command -v gh >/dev/null 2>&1; then
       gh pr create --fill --title "${TITLE:-Maintenance cycle $(date -u +%Y-%m-%d)}" \
         >/dev/null 2>&1 && gh pr merge --auto --squash >/dev/null 2>&1 \
-        && log "remote_cycle: PR opened with auto-merge enabled" \
-        || log "remote_cycle: branch pushed; PR creation via gh failed (open it manually)"
+        && echo "PR opened with auto-merge enabled" \
+        || echo "branch pushed; PR creation via gh failed (open it manually)"
     else
-      log "remote_cycle: branch pushed; open a PR for $BRANCH (gh unavailable)"
+      ORIGIN_URL="$(git -C "$REPO" remote get-url origin 2>/dev/null || true)"
+      SLUG="$(printf '%s' "$ORIGIN_URL" \
+        | sed -E 's#^(git@github\.com:|https://github\.com/)##; s#\.git$##')"
       echo "PUSHED_BRANCH=$BRANCH"
-      echo "note: gh not available - open a PR for $BRANCH so the gates can run"
+      if [[ "$ORIGIN_URL" == *github.com* && "$SLUG" == */* ]]; then
+        echo "open a PR for $BRANCH so the gates can run -- use whatever GitHub tooling this session has (the GitHub MCP tools in remote sessions): https://github.com/$SLUG/compare/$DEFAULT_BRANCH...$BRANCH"
+      else
+        echo "open a PR for $BRANCH so the gates can run -- use whatever GitHub tooling this session has (the GitHub MCP tools in remote sessions)"
+      fi
     fi
 
-    "$0" abort --repo "$REPO" >/dev/null
+    release_lock "finished $BRANCH"
     echo "cycle finished on $BRANCH"
     ;;
 
   abort)
-    PYTHONPATH="$SCRIPT_DIR" "$PYBIN" -c '
-import sys
-sys.path.insert(0, "'"$SCRIPT_DIR"'")
-from pathlib import Path
-from zettel_lib import gitlock
-gitlock.release(Path(sys.argv[1]))
-' "$REPO"
+    release_lock "abort"
     log "remote_cycle: lock released"
     echo "lock released"
     ;;
