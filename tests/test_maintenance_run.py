@@ -111,6 +111,41 @@ def test_budget_cutoff_blocks_the_push_and_mirrors_exit_code(repo_with_origin):
     assert "ABORT claude exited 7" in (repo / "log.md").read_text(encoding="utf-8")
 
 
+# --- FR-37 sandbox (checklist 10, AC-37) --------------------------------------
+
+def test_smith_proposal_cycle_passes_the_gates_and_pushes(repo_with_origin):
+    repo, origin = repo_with_origin
+    before = origin_head(origin)
+
+    result = run_maintenance(repo, mode="smith")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    assert origin_head(origin) != before
+    pushed = subprocess.run(
+        ["git", "-C", str(origin), "ls-tree", "-r", "--name-only", "main"],
+        capture_output=True, text=True, check=True).stdout
+    assert "skills/demo-skill/SKILL.md" in pushed
+    assert "skills/demo-skill/PURPOSE.md" in pushed
+    impact_md = (repo / "skill-impact.md").read_text(encoding="utf-8")
+    assert "proposed" in impact_md and "demo-skill" in impact_md
+    assert "skill-smith: proposed demo-skill" in (repo / "log.md").read_text(encoding="utf-8")
+
+
+def test_plugin_repo_write_is_blocked_and_logged(repo_with_origin):
+    repo, origin = repo_with_origin
+    before = origin_head(origin)
+    planted = PLUGIN_ROOT / ".stub-escape"
+    try:
+        result = run_maintenance(repo, mode="smith-escape")
+        assert result.returncode != 0, "an out-of-repo write must fail the run"
+        assert planted.exists(), "the stub should have planted the escape file"
+        assert origin_head(origin) == before, "nothing may be pushed (AC-37)"
+        assert "SANDBOX VIOLATION" in (repo / "log.md").read_text(encoding="utf-8")
+        assert "SANDBOX VIOLATION" in result.stderr
+    finally:
+        planted.unlink(missing_ok=True)
+
+
 # --- run.lock (checklist 9, AC-30) --------------------------------------------
 
 def test_second_concurrent_run_aborts_on_lock(repo_with_origin):

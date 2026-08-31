@@ -33,9 +33,15 @@ groundedness (flag < 0.80, block < 0.70), atomicity, clarity, link quality.
 A blocked note must not merge to the main branch — leave it in its worktree.
 
 Step 7. Skill-smith retrospective — ONLY if config.yml `skill_smith_cadence`
-is due (check log.md for the last `skill-smith:` entry). If due, delegate to
-the `skill-smith` agent: at most one proposal, only under skills/, recorded in
-skill-impact.md.
+is due (check log.md for the last `skill-smith:` entry). If due, note the
+current commit (`git rev-parse HEAD`), create a worktree
+({{SCRIPTS}}/new_worktree.sh) and delegate to the `skill-smith` agent inside
+it: at most one proposal, only under skills/, finishing with
+`skill_review.py propose` so the diff is recorded in skill-impact.md. Before
+merging the worktree back, verify the smith's diff stayed in its sandbox:
+    {{PYTHON}} {{SCRIPTS}}/check_skill_sandbox.py --repo <worktree> --base <noted commit> --strict
+If that exits non-zero, do NOT merge the worktree; log the violation and
+continue the cycle without the proposal.
 
 Step 8. Run the lint gates yourself and fix what they find, re-running until
 clean or until nothing more can be fixed honestly:

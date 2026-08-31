@@ -73,9 +73,10 @@ def changed_paths(repo: ContentRepo, base_ref: str) -> list[tuple[str, str]]:
     return out
 
 
-def _is_allowed(path: str) -> bool:
+def is_allowed_path(path: str) -> bool:
+    """True when a path is inside the smith's writable set (FR-37)."""
     p = PurePosixPath(path)
-    return path in ALLOWED_FILES or (p.parts and p.parts[0] == ALLOWED_DIR)
+    return path in ALLOWED_FILES or bool(p.parts and p.parts[0] == ALLOWED_DIR)
 
 
 def classify_changes(
@@ -88,7 +89,7 @@ def classify_changes(
 
     for status, path in changes:
         top = PurePosixPath(path).parts[0] if PurePosixPath(path).parts else ""
-        if strict and not _is_allowed(path):
+        if strict and not is_allowed_path(path):
             violations.append(Violation(
                 path, "sandbox-escape",
                 "the skill-smith may write only under skills/ plus "
