@@ -76,6 +76,12 @@ def build(repo: ContentRepo) -> dict:
         if visibility != "public":
             entry["api_path"] = api_path_for(cfg, rel)
         entries.append(entry)
+        if note.id in id_to_key and id_to_key[note.id] != note.key:
+            # A bare-ID link would otherwise resolve to whichever note was
+            # indexed last -- silently, and to the wrong note.
+            raise FrontmatterError(
+                f"{rel}: duplicate note id {note.id!r}, already held by "
+                f"{id_to_key[note.id]!r}")
         id_to_key[note.id] = note.key
 
     entries.sort(key=lambda e: e["key"])
@@ -85,7 +91,34 @@ def build(repo: ContentRepo) -> dict:
         "note_count": len(entries),
         "id_to_key": dict(sorted(id_to_key.items())),
         "notes": entries,
+        "inquiries": build_inquiries(repo),
     }
+
+
+def build_inquiries(repo: ContentRepo) -> list[dict]:
+    """Index open questions so a run can find them without parsing markdown (FR-6).
+
+    Inquiries live alongside the notes but outside the graph, so they get their
+    own block rather than a `type` in `notes`: nothing should ever traverse a
+    link into a question.
+    """
+    out = []
+    for path in repo.inquiry_paths():
+        note = Note.load(path)
+        rel = repo.rel(path)
+        if not note.key:
+            raise FrontmatterError(f"{rel}: frontmatter is missing 'key'")
+        out.append({
+            "key": note.key,
+            "question": note.question,
+            "status": note.status,
+            "priority": note.priority,
+            "result_notes": sorted(note.result_notes),
+            "path": rel,
+            "updated": str(note.meta.get("updated") or note.meta.get("created") or ""),
+        })
+    out.sort(key=lambda item: item["key"])
+    return out
 
 
 def build_refs(repo: ContentRepo) -> list[dict]:
