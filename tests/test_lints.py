@@ -89,6 +89,31 @@ def test_scripture_excluded_from_bibliography(broken_repo):
     assert "scripture-in-bibliography" in rules(result)
 
 
+def test_plain_english_per_is_not_attribution(broken_repo):
+    """'per period' is arithmetic, not a citation (found live by the CI gate)."""
+    def mutate(repo):
+        note = load(repo, f"permanent/{PERM_KEY}.md")
+        note.body = ("The number of compounding periods matters more than the rate "
+                     "per period over long horizons. [[" + REF_KEY + "]]\n")
+        note.meta["links"] = [{"target_id": REF_KEY, "relation": "source"}]
+        note.save()
+
+    result = run_script("lint_citations.py", broken_repo(mutate))
+    assert result.returncode == 0, result.stdout
+
+
+def test_per_a_named_source_is_attribution(broken_repo):
+    def mutate(repo):
+        note = load(repo, f"permanent/{PERM_KEY}.md")
+        note.body = "Per Ahrens, atomic notes compound; nothing is linked here.\n"
+        note.meta["links"] = [{"target_id": LIT_KEY, "relation": "elaborates"}]
+        note.save()
+
+    result = run_script("lint_citations.py", broken_repo(mutate))
+    assert result.returncode != 0
+    assert "uncited-claim" in rules(result)
+
+
 # --- lint_links (FR-5, FR-21) -------------------------------------------------
 
 def test_bad_typed_link_relation_fails(broken_repo):

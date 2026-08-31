@@ -4,15 +4,18 @@ A Claude Code plugin that scaffolds and perpetually grows a **citation-grounded
 Zettelkasten** knowledge repository on GitHub. Every sourced claim traces to a
 verified reference; notes that cannot be grounded fail a lint and never land.
 
-> **Status: Phase 3 of 4** — substrate, citation gates, the agent orchestra,
-> scheduled maintenance runs, two-mode access, and the serendipity sweep.
-> Skill emergence (Phase 4) remains. See [`PLAN.md`](PLAN.md).
+> **Status: Phase 3.5 of 4** — substrate, citation gates, the agent orchestra,
+> scheduled maintenance (laptop cron *and* fully remote via Routines + CI
+> gating), two-mode access, and the serendipity sweep. Skill emergence
+> (Phase 4) remains. See [`PLAN.md`](PLAN.md).
 
 ## Two repositories
 
-This is the **skill repo** — private, and it contains only the plugin. Your
-notes live in a separate **content repo** that `init_content_repo.sh` creates
-for you at genesis, public or private as you choose. They never mix.
+This is the **skill repo** — it contains only the plugin, never notes. Your
+notes live in a separate **content repo**, scaffolded by `init_content_repo.sh`
+at genesis. They never mix. Both repos are public: the skill has no secrets in
+it (auth always comes from `gh`, the SSH agent, or environment variables), and
+a public skill repo is what lets cloud environments install it with no token.
 
 ## Install
 
@@ -101,6 +104,17 @@ The sweep never edits notes and always exits 0 — a candidate is a reason to
 look, not a link. The connector agent reads both notes and justifies or
 discards each one; the critic writes accepted links into both notes. Details:
 [`references/serendipity.md`](references/serendipity.md).
+
+### Fully remote scheduled runs (no laptop)
+
+A Routine fires a fresh remote session on a cloud environment whose setup
+script (`ci/setup-environment.sh`) has already installed this skill. The
+session claims a **git-ref lock** (`scripts/zettel_lib/gitlock.py` — a
+container-local lock file can't serialize two ephemeral containers), works on a
+`zettel/run-*` branch via `scripts/remote_cycle.sh`, and hands a PR to CI.
+`ci/content-repo-gates.yml`, installed in the content repo with `gates` as a
+**required status check**, decides what reaches `main` — enforcement no session
+can bypass. Full walkthrough: [`references/remote-execution.md`](references/remote-execution.md).
 
 ### Remote reading (Mode B)
 
