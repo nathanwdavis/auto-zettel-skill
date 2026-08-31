@@ -38,9 +38,12 @@ STRONG_TIERS = {"peer-reviewed", "primary-text", "reputable-secondary"}
 WEAK_TIER = "general-web"
 
 # A permanent note makes a "sourced claim" when it cites, quotes, or attributes.
+# "per" only counts as attribution when aimed at a named source ("per Smith",
+# "per The Chicago Manual") -- bare "per period"/"per year" is plain English,
+# not a citation, and flagging it forces links to references that do not exist.
 SOURCED_CLAIM = re.compile(
     r"(\baccording to\b|\bargues\b|\bshows that\b|\bfound that\b|\breports\b"
-    r"|\bdemonstrates\b|\bwrites\b|\bconcludes\b|\bper\b\s|\bcites\b|“|\")",
+    r"|\bdemonstrates\b|\bwrites\b|\bconcludes\b|\bper\s+(?=(?-i:[A-Z]))|\bcites\b|“|\")",
     re.IGNORECASE,
 )
 
