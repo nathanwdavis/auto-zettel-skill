@@ -19,9 +19,13 @@ Step 4. Routine maintenance: delegate to the `note-maintainer` agent for the
 fleeting sweep, INBOX-driven revisions, and link repair.
 
 Step 5. Connector sweep — ONLY if config.yml `connector_cadence` is due (check
-log.md for the last `connector:` entry). If due, delegate to the `connector`
-agent; its proposals go to proposed-links/ and the critic reviews them:
-accepted links are written into BOTH notes, rejections are logged.
+log.md for the last `serendipity_sweep:` entry). If due:
+    {{PYTHON}} {{SCRIPTS}}/serendipity_sweep.py --repo {{REPO}}
+then delegate to the `connector` agent to read both notes of each candidate,
+keep and justify the real ones, and delete the rest. The critic then reviews
+what survives: accepted links are written into BOTH notes, rejections logged.
+The sweep never edits notes and always exits 0 — a degraded scorer is a logged
+warning, not a failure.
 
 Step 6. Delegate to the `critic` agent to gate every new or changed note:
 groundedness (flag < 0.80, block < 0.70), atomicity, clarity, link quality.
@@ -34,14 +38,14 @@ skill-impact.md.
 
 Step 8. Run the lint gates yourself and fix what they find, re-running until
 clean or until nothing more can be fixed honestly:
-    python3 {{SCRIPTS}}/verify_refs.py --repo {{REPO}} {{VERIFY_ARGS}}
-    python3 {{SCRIPTS}}/lint_citations.py --repo {{REPO}}
-    python3 {{SCRIPTS}}/lint_links.py --repo {{REPO}}
+    {{PYTHON}} {{SCRIPTS}}/verify_refs.py --repo {{REPO}} {{VERIFY_ARGS}}
+    {{PYTHON}} {{SCRIPTS}}/lint_citations.py --repo {{REPO}}
+    {{PYTHON}} {{SCRIPTS}}/lint_links.py --repo {{REPO}}
 Never fix a lint by deleting knowledge, weakening a claim's sourcing, or
 marking something verified that is not.
 
 Step 9. Rebuild the machine-readable index:
-    python3 {{SCRIPTS}}/build_manifest.py --repo {{REPO}}
+    {{PYTHON}} {{SCRIPTS}}/build_manifest.py --repo {{REPO}}
 
 Step 10. Update INBOX.md and inquiries/ statuses (answered inquiries carry
 result_notes backlinks to the permanent notes that answered them). Then commit

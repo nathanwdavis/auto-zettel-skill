@@ -15,7 +15,7 @@ maintenance prompt delegates to them by name).
 | synthesizer | strong | atomic permanent notes, title-as-claim, 1-1-1 | creates reference notes; unsourced claims |
 | critic | strong | claim-by-claim groundedness, rubric scores, gates merges | rewrites notes |
 | librarian | cheap | MOCs, INDEX layering, tag ontology, manifest rebuild | alters claim text |
-| connector | cheap | cross-cluster link proposals into `proposed-links/` | edits notes directly |
+| connector | cheap | runs the sweep, then reads both notes to justify or discard each candidate | edits notes directly; trusts a score without reading |
 | note-maintainer | cheap | INBOX revisions, fleeting sweep, link repair | deletes knowledge on its own judgment |
 | skill-smith | strong | ≤1 child-skill proposal per cycle, under content-repo `skills/` only | touches the skill repo; re-proposes rejections |
 

@@ -1,0 +1,9 @@
+# Optional: embedding-based similarity for serendipity_sweep.py.
+#
+# The sweep works without this -- it falls back to stdlib lexical scoring and
+# logs the downgrade (spec section 10: the LLM-only fallback ships by default).
+# Installing this pulls torch (~1-2 GB) and downloads model weights on first
+# use, so it is opt-in. Enable it with `embedding.enabled: true` in the content
+# repo's config.yml.
+
+sentence-transformers>=3.0

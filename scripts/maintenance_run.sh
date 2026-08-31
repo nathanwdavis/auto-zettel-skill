@@ -16,6 +16,8 @@ PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO=""; MAILTO=""; DRY_RUN=0
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 PYBIN="${PYTHON:-python3}"
+command -v "$PYBIN" >/dev/null 2>&1 || { echo "error: python not found: $PYBIN" >&2; exit 1; }
+PYBIN="$(command -v "$PYBIN")"
 STALE_LOCK_HOURS="${STALE_LOCK_HOURS:-6}"
 
 usage() {
@@ -113,7 +115,8 @@ log "maintenance_run: step 1 lock acquired, pulled, HEAD=${PRE_HEAD:0:9}"
 VERIFY_ARGS="--offline"
 [[ -n "$MAILTO" ]] && VERIFY_ARGS="--mailto $MAILTO"
 PROMPT="$(sed -e "s|{{REPO}}|$REPO|g" -e "s|{{VERIFY_ARGS}}|$VERIFY_ARGS|g" \
-  -e "s|{{SCRIPTS}}|$SCRIPT_DIR|g" "$SCRIPT_DIR/maintenance_prompt.md")"
+  -e "s|{{SCRIPTS}}|$SCRIPT_DIR|g" -e "s|{{PYTHON}}|$PYBIN|g" \
+  "$SCRIPT_DIR/maintenance_prompt.md")"
 AGENTS_JSON="$(PYTHONPATH="$SCRIPT_DIR" "$PYBIN" -m zettel_lib.agents --repo "$REPO")" \
   || die "failed to build agents JSON from config.yml"
 
@@ -126,11 +129,16 @@ RUN_LOG="$RESULTS_DIR/$RUN_ID.log"
 
 # One comma-separated argument: several patterns contain spaces, so this must
 # never be word-split (a split allowlist silently denies git add/commit).
-ALLOWED_TOOLS="Read,Write,Edit,Glob,Grep,Agent,WebSearch,WebFetch,Bash(python:*),Bash(python3:*),Bash(git add:*),Bash(git commit:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git merge:*),Bash(git worktree:*),Bash(git branch:*),Bash(bash:*)"
+#
+# $PYBIN is allowlisted by its resolved absolute path because that is exactly
+# how the prompt invokes it -- a bare `Bash(python3:*)` pattern does not match
+# `/path/to/.venv/bin/python ...`, which silently denies every script call.
+ALLOWED_TOOLS="Read,Write,Edit,Glob,Grep,Agent,WebSearch,WebFetch,Bash(${PYBIN}:*),Bash(python:*),Bash(python3:*),Bash(git add:*),Bash(git commit:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git merge:*),Bash(git worktree:*),Bash(git branch:*),Bash(bash:*)"
 
 set +e
 ( cd "$REPO" && "$CLAUDE_BIN" -p "$PROMPT" \
   --plugin-dir "$PLUGIN_ROOT" \
+  --add-dir "$PLUGIN_ROOT" \
   --agents "$AGENTS_JSON" \
   --output-format json \
   --max-turns "$MAX_TURNS" \

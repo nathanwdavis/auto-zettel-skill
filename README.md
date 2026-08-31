@@ -4,9 +4,9 @@ A Claude Code plugin that scaffolds and perpetually grows a **citation-grounded
 Zettelkasten** knowledge repository on GitHub. Every sourced claim traces to a
 verified reference; notes that cannot be grounded fail a lint and never land.
 
-> **Status: Phase 2 of 4** — substrate, citation gates, the agent orchestra,
-> scheduled maintenance runs, and two-mode access. Serendipity sweeps (Phase 3)
-> and skill emergence (Phase 4) remain. See [`PLAN.md`](PLAN.md).
+> **Status: Phase 3 of 4** — substrate, citation gates, the agent orchestra,
+> scheduled maintenance runs, two-mode access, and the serendipity sweep.
+> Skill emergence (Phase 4) remains. See [`PLAN.md`](PLAN.md).
 
 ## Two repositories
 
@@ -43,7 +43,9 @@ pip install -r requirements.txt
 ```
 
 This pulls `pypandoc-binary`, which ships its own pandoc build — no system
-pandoc install needed. See
+pandoc install needed. `requirements-optional.txt` adds
+`sentence-transformers` for embedding-based serendipity scoring; it is opt-in
+because it pulls torch (~1–2 GB), and the sweep works without it. See
 [`references/citation-rules.md`](references/citation-rules.md) for why pandoc
 rather than citeproc-py renders the Chicago strings.
 
@@ -81,6 +83,24 @@ pushes, so a runaway or budget-cut run can never push unlinted state. Budget
 and turn caps come from the content repo's `config.yml`. `--dry-run` does
 everything except the push. A working crontab line and the desktop/cloud
 caveats are in [`references/scheduling.md`](references/scheduling.md).
+
+### Serendipity — surfacing unplanned connections
+
+```sh
+scripts/serendipity_sweep.py --repo <content-repo>
+```
+
+Builds the link graph, detects communities with Louvain, and writes
+cross-community candidate links into `proposed-links/`. Scoring uses the
+standard library by default; set `embedding.enabled: true` in the content
+repo's `config.yml` and install `requirements-optional.txt` to use
+sentence-transformers instead (it degrades back to lexical, with a logged
+warning, if the model is unavailable).
+
+The sweep never edits notes and always exits 0 — a candidate is a reason to
+look, not a link. The connector agent reads both notes and justifies or
+discards each one; the critic writes accepted links into both notes. Details:
+[`references/serendipity.md`](references/serendipity.md).
 
 ### Remote reading (Mode B)
 
@@ -152,6 +172,10 @@ Two acceptance checks cannot run in a sandboxed or offline environment and are
 
 The maintenance runner is tested with a stub `claude` binary (locking, gate
 enforcement, push authority) plus a real capped headless run where possible.
+
+- Live `sentence-transformers` scoring — the embedding path is unit-tested with
+  an injected encoder; downloading real model weights needs network access to
+  HuggingFace.
 
 ## Security
 
