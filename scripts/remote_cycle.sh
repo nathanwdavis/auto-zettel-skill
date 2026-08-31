@@ -92,14 +92,25 @@ if broken:
           f"({broken.age_hours():.1f}h old)", file=sys.stderr)
 ' "$TTL"
 
+    # claim() raises on a push-access failure (as opposed to contention), so a
+    # non-zero exit here means "cannot push locks at all" -- die with the real
+    # error rather than pretending another run holds the lock.
+    set +e
     ACQUIRED="$(lockpy '
 import sys
 sys.path.insert(0, "'"$SCRIPT_DIR"'")
 from pathlib import Path
 from zettel_lib import gitlock
-ok, holder = gitlock.claim(Path(sys.argv[1]), sys.argv[2], sys.argv[3])
+try:
+    ok, holder = gitlock.claim(Path(sys.argv[1]), sys.argv[2], sys.argv[3])
+except gitlock.GitLockError as exc:
+    print(f"error: {exc}", file=sys.stderr)
+    raise SystemExit(1)
 print("yes" if ok else f"no\t{holder.holder}\t{holder.session}\t{holder.age_hours():.2f}")
 ' "$HOLDER" "$SESSION")"
+    CLAIM_RC=$?
+    set -e
+    [[ $CLAIM_RC -eq 0 ]] || die "could not claim the run lock -- no push access to origin? (see error above)"
 
     if [[ "$ACQUIRED" != "yes" ]]; then
       IFS=$'\t' read -r _ h s age <<< "$ACQUIRED"

@@ -92,7 +92,17 @@ def claim(repo: Path, holder: str, session: str = "",
     push = _git(repo, "push", remote, f"{sha}:{LOCK_REF}", check=False)
     if push.returncode == 0:
         return True, None
-    return False, read(repo, remote)
+    holder = read(repo, remote)
+    if holder is None:
+        # The push failed but no lock exists: this is not contention, it is a
+        # real failure (most likely no push credential for the remote). Found
+        # live: a session without the repo in its authorized set got a proxy
+        # 403 here, and returning (False, None) crashed the caller instead of
+        # reporting the actual problem.
+        raise GitLockError(
+            "lock push rejected but no lock exists on the remote -- "
+            f"push access failure, not contention: {push.stderr.strip()[:400]}")
+    return False, holder
 
 
 def release(repo: Path, remote: str = "origin") -> None:

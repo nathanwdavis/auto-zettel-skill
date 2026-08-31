@@ -121,6 +121,31 @@ def test_age_is_computed_from_the_recorded_timestamp():
     assert 2.9 < info.age_hours() < 3.1
 
 
+# --- push-access failure is not contention (found live) -------------------------
+
+@pytest.fixture
+def push_denied(two_containers):
+    """Origin rejects every push, as a credential-less proxy would."""
+    a, _ = two_containers
+    origin = a.parent / "origin.git"
+    hook = origin / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\necho 'access denied by the git proxy' >&2\nexit 1\n",
+                    encoding="utf-8")
+    hook.chmod(0o755)
+    return a
+
+
+def test_push_denial_raises_instead_of_masquerading_as_contention(push_denied):
+    """A live spike run hit this: no push credential looked like None.holder."""
+    with pytest.raises(gitlock.GitLockError, match="push access failure"):
+        gitlock.claim(push_denied, "run-A", "sess-1")
+
+
+def test_push_denial_error_carries_the_remote_message(push_denied):
+    with pytest.raises(gitlock.GitLockError, match="access denied by the git proxy"):
+        gitlock.claim(push_denied, "run-A")
+
+
 # --- payload ------------------------------------------------------------------
 
 def test_lock_blob_is_valid_json_with_the_expected_fields(two_containers):

@@ -143,6 +143,21 @@ def test_finish_refuses_when_not_on_a_run_branch(content_repo):
     assert "not on a run branch" in result.stderr
 
 
+def test_push_denied_start_fails_clearly_not_as_standdown(content_repo):
+    """No push access must exit 1 with the real error -- never a fake exit 3."""
+    repo, origin = content_repo
+    hook = origin / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\necho 'access denied by the git proxy' >&2\nexit 1\n",
+                    encoding="utf-8")
+    hook.chmod(0o755)
+
+    result = cycle(repo, "start")
+    assert result.returncode == 1, (result.returncode, result.stdout, result.stderr)
+    assert "push access" in result.stderr or "could not claim" in result.stderr
+    assert "standing down" not in result.stdout
+    assert "Traceback" not in result.stderr, "failures must be reported, not crash"
+
+
 # --- abort --------------------------------------------------------------------
 
 def test_abort_releases_the_lock_and_keeps_the_branch(content_repo):
