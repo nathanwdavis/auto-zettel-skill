@@ -42,6 +42,7 @@ clean or until nothing more can be fixed honestly:
     {{PYTHON}} {{SCRIPTS}}/verify_refs.py --repo {{REPO}} {{VERIFY_ARGS}}
     {{PYTHON}} {{SCRIPTS}}/lint_citations.py --repo {{REPO}}
     {{PYTHON}} {{SCRIPTS}}/lint_links.py --repo {{REPO}}
+    {{PYTHON}} {{SCRIPTS}}/lint_skills.py --repo {{REPO}}
 Never fix a lint by deleting knowledge, weakening a claim's sourcing, or
 marking something verified that is not.
 

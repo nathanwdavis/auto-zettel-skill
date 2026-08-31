@@ -30,6 +30,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: content
+          # Full history: the skill-sandbox gate diffs against the merge-base
+          # with main, which a depth-1 clone cannot compute.
+          fetch-depth: 0
 
       - name: Check out zettel-bootstrap skill
         uses: actions/checkout@v4
@@ -63,3 +66,16 @@ jobs:
 
       - name: Link gate
         run: python skill/scripts/lint_links.py --repo content
+
+      - name: Skill layer gate
+        run: python skill/scripts/lint_skills.py --repo content
+
+      # AC-37, remote half: the wrapper's plugin-tree check does not exist in
+      # Mode B (the session IS the agent), so the sandbox invariants bind here,
+      # server-side, where no session can reach. The whole-cycle diff must keep
+      # log.md and skill-impact.md append-only and raw/ immutable.
+      - name: Skill sandbox gate
+        run: |
+          git -C content fetch -q origin main
+          python skill/scripts/check_skill_sandbox.py --repo content \
+            --base "$(git -C content merge-base origin/main HEAD)"

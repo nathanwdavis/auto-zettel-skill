@@ -36,7 +36,8 @@ trap 'rm -rf "$WORK"' EXIT
 # --- 2. scripts respond to --help --------------------------------------------
 step "[2] script CLI contract"
 for s in build_manifest.py lint_citations.py lint_links.py verify_refs.py fetch_remote.py \
-         serendipity_sweep.py capture.py inquiries.py; do
+         serendipity_sweep.py capture.py inquiries.py lint_skills.py \
+         check_skill_sandbox.py; do
   "$PY" "scripts/$s" --help >/dev/null 2>&1 || fail "scripts/$s --help"
   pass "scripts/$s --help"
 done

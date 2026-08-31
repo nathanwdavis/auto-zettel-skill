@@ -70,6 +70,11 @@ def build_clean_repo(root: Path) -> Path:
 
     (root / "config.yml").write_text(yaml.safe_dump(CONFIG, sort_keys=False), encoding="utf-8")
     (root / "log.md").write_text("# Operation log\n", encoding="utf-8")
+    (root / "skill-impact.md").write_text(
+        "# Skill impact tracker\n\n"
+        "| date | proposal | target skill | outcome | reason |\n"
+        "|------|----------|--------------|---------|--------|\n",
+        encoding="utf-8")
     (root / "INBOX.md").write_text("# Inbox\n", encoding="utf-8")
     (root / "INDEX.md").write_text(
         f"# Index\n\n## Maps of Content\n\n- [[{MOC_KEY}]]\n", encoding="utf-8")
@@ -125,6 +130,27 @@ def build_clean_repo(root: Path) -> Path:
 
     run_script("build_manifest.py", root)
     return root
+
+
+def plant_skill(repo: Path, name: str, status: str = "proposed",
+                cite: str = PERM_KEY, kind: str = "create",
+                proposal_id: str = "209901010100") -> Path:
+    """Write a wellformed child skill: the two-file unit lint_skills accepts."""
+    d = repo / "skills" / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "SKILL.md").write_text(dump(
+        {"name": name, "description": f"A planted test skill named {name}."},
+        f"# {name}\n\n## When to use\nIn tests.\n\n## Procedure\n1. Exist.\n",
+    ), encoding="utf-8")
+    (d / "PURPOSE.md").write_text(dump(
+        {"skill": name, "status": status, "proposal_id": proposal_id,
+         "kind": kind, "proposed": "2026-08-31", "decided": ""},
+        f"# Purpose — {name}\n\n## Origin\nPlanted by a test.\n\n"
+        f"## Patterns-Addressed\nMotivated by [[{cite}]].\n\n"
+        f"## Evolution-History\n| date | change | outcome |\n"
+        f"|------|--------|---------|\n",
+    ), encoding="utf-8")
+    return d
 
 
 def run_script(name: str, repo: Path, *args: str) -> subprocess.CompletedProcess:
