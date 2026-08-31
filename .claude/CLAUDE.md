@@ -17,7 +17,7 @@ variables. `.gitignore` covers `.env`, `*.token`, `*.pem`, `.netrc`, `run.lock`.
 ## Running things
 
 ```sh
-.venv/bin/python -m pytest -q      # 320 tests, ~100s
+.venv/bin/python -m pytest -q      # 333 tests, ~130s
 ./smoke_test.sh                    # pytest + end-to-end scaffold; exit 0 or it isn't done
 claude plugin validate --strict .
 ```
@@ -49,7 +49,7 @@ shape of fix.
 the source of truth, and code comments cite it by number.
 
 Deviations are recorded as **numbered amendments** at the top of that file
-(A1–A6 so far). When implementation forces a change to the spec, append A7
+(A1–A8 so far). When implementation forces a change to the spec, append the next
 rather than editing the requirement text: the reasoning is worth more than a
 tidy document. `PLAN.md` tracks phase status and the build order.
 
@@ -68,6 +68,11 @@ tidy document. `PLAN.md` tracks phase status and the build order.
   which is what the design originally called for and the proxy rejected.
 - **A Routine-fired session has no push credentials** unless it is spawned with
   `source_url`, or the Routine was created from the claude.ai UI.
+- **A remote-session clone has no `refs/remotes/origin/HEAD`**, and the cached
+  `/opt/zettel-skill` install can be arbitrarily stale — both bit live runs
+  (issue #7, amendment A8). Default-branch probes must be pipefail-safe, and
+  `remote_cycle.sh refresh-skill` is the currency mechanism; do not "verify"
+  install freshness with presence checks.
 - `rsync` is not installed (use `tar`). `pip install --upgrade pip` hard-fails
   on the Debian system pip, which is why `ci/setup-environment.sh` skips it.
 

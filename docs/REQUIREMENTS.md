@@ -158,6 +158,44 @@ unchanged, but each needed a mechanical shape the prose does not fix:
   judge call, order-randomized. Promotion itself remains a human act; FR-36
   is unchanged. Remote budget caps remain as A5 states.
 
+### A8 — Field fixes from the first live remote session (2026-08-31, FR-10, FR-22, FR-25, FR-28, FR-29, NFR-2; issue #7)
+
+The first real end-to-end session against a live content repo surfaced ten
+findings (issue #7). Five change spec-adjacent behavior:
+
+- **Skill currency (P0).** A5's cached environment install froze the skill at
+  cache time — found 12 commits stale, silently, while a presence-style check
+  passed. The cache is now the *bootstrap*; `remote_cycle.sh refresh-skill`
+  (fast-forward-only, always exit 0, run by the remote prompt before every
+  cycle) is the *currency mechanism*, and `start`/`finish` log the installed
+  skill revision so every cycle records which code produced it.
+  `ZETTEL_SKILL_REF` still pins deliberately.
+- **Agent availability (FR-29).** The remote path had none of the eight named
+  agents (only `skills/` was linked; the `--agents` mechanism is
+  laptop-only), so "delegate to the `critic`" could silently skip the QA-1
+  gate. Setup now registers `agents/*.md` in `~/.claude/agents`, and both
+  maintenance prompts carry the explicit fallback: adopt the missing agent's
+  role from its definition, logged as self-review. **The critic gate is the
+  session's own responsibility; delegation is an optimization, never a
+  precondition.**
+- **Stand-down legibility (FR-30/NFR-2).** A failed `start` and a healthy
+  no-op cycle were indistinguishable from the repo, because a no-op pushes
+  nothing by design. `gitlock.release()` now records a reason in the release
+  commit on the pushed lock branch (`start-failed`, `empty-cycle`,
+  `already-merged`, `finished <branch>`, `abort`, `stale-broken`).
+- **Verification semantics (FR-10/FR-22).** `verify_refs.py` writes a note
+  only when its verification state or rendered strings changed
+  (`verification.date` = when the state was established; `updated` = last
+  authored edit), and when a capture and an identifier are both present it
+  checks both: hit → `method: raw-capture+<registry>`; definitive miss →
+  still verified on the capture, plus `identifier_check: failed` and a
+  warning. The either/or of FR-10 is unchanged; "verified" just means the
+  stronger thing when the stronger check is possible.
+- **Default-branch resolution.** `refs/remotes/origin/HEAD` cannot be assumed
+  (remote-session clones lack it, and under pipefail the old probe killed
+  every scheduled run); the default branch is asked of the remote, with
+  `main` as last resort, in both `start` and `finish`.
+
 -----
 
 ## TL;DR

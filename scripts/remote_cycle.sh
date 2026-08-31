@@ -196,7 +196,12 @@ print("yes" if ok else f"no\t{holder.holder}\t{holder.session}\t{holder.age_hour
     git -C "$REPO" checkout -q "$DEFAULT_BRANCH"
     git -C "$REPO" pull -q --ff-only origin "$DEFAULT_BRANCH"
 
+    # Second-resolution names collide when a run restarts within a second of
+    # the last (surfaced by the reasons test): uniquify rather than fail.
     BRANCH="zettel/run-$(date -u +%Y%m%d%H%M%S)"
+    while git -C "$REPO" show-ref --verify --quiet "refs/heads/$BRANCH"; do
+      BRANCH="zettel/run-$(date -u +%Y%m%d%H%M%S)-$RANDOM"
+    done
     git -C "$REPO" checkout -q -b "$BRANCH"
     trap - ERR
 
