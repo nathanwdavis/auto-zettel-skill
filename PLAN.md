@@ -3,7 +3,7 @@
 **Source of truth:** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (all FR-x / AC-x / NFR-x / QA-x / checklist references below point there). Deviations forced by implementation are recorded there as numbered amendments — **A1–A8** so far.
 **Working on this repo:** [`.claude/CLAUDE.md`](.claude/CLAUDE.md) — how to run the suite, the environment's sharp edges, and the conventions.
 **This repo:** the skill repo. It contains ONLY the `zettel-bootstrap` plugin — never zettelkasten content. The content repo is created at genesis runtime by `init_content_repo.sh` and is out of scope for this repo's file tree. Both repos are public (A4); nothing here may contain a secret (NFR-4).
-**Status:** All phases complete — 1, 2, 3, 3.5, 3.6 (PR #5), and 4. Every §12 checklist item passes.
+**Status:** All phases complete — 1, 2, 3, 3.5, 3.6 (PR #5), 4 (PR #6) — plus the post-Phase-4 field-fix round from the first live end-to-end session (issue #7 → PR #8, amendment A8). Every §12 checklist item passes. What remains is operational, not code: see **Handoff — next steps** at the end of §2.
 
 ---
 
@@ -13,7 +13,7 @@ The plugin is laid out at the repo root (only `plugin.json` lives inside `.claud
 
 ```
 .claude-plugin/plugin.json          # name (required), version, description, author, repository (string URL)
-skills/zettel-bootstrap/SKILL.md    # six portable frontmatter fields only; body <500 lines (currently 248)
+skills/zettel-bootstrap/SKILL.md    # six portable frontmatter fields only; body <500 lines (currently 286)
 agents/                             # 8 subagent definitions (.md + YAML frontmatter)
   orchestrator.md researcher.md synthesizer.md critic.md
   librarian.md connector.md note-maintainer.md skill-smith.md
@@ -124,7 +124,7 @@ Every input path assumed a machine authored it. Dropping plain markdown into `fl
 3. **`scripts/adhoc_research.sh`** — same lock, same run branch, same required-check handoff as a scheduled cycle. Exit 3 propagates unchanged: a live lock is never stolen. The question is filed *before* any research, so an interrupted session still leaves it behind. There is deliberately no ad-hoc path to `main`.
 4. **A latent bug the tests surfaced**: note IDs are minute-resolution and the manifest's `id_to_key` map is many-to-one, so two notes minted in the same minute collided and a bare-ID link resolved to whichever was indexed last — silently. `capture.py` allocates around IDs in use; `build_manifest.py` raises and `lint_links.py` reports `duplicate-id` for notes it did not write.
 
-**Still open**: the live handoff check — capture an inquiry, let the next scheduled Routine pick it up, confirm it lands `answered` with a `result_notes` backlink. It is the only end-to-end test of the human → scheduled-run handoff against a real cycle (everything else is stub-proven). Still worth running now that Phase 4 is in; a skill-smith-due cycle doubles as the live test of the proposal path.
+**Still open**: the live human → scheduled-run handoff check — see **Handoff — next steps** below.
 
 ### Phase 4 — Skill emergence (WikiSkill-adapted)  ✅ shipped
 *Amendment A7. Exit gate: checklist item 10.*
@@ -163,6 +163,44 @@ tested before the proposer could run against it.
 5. Docs: `references/skill-emergence.md` + `quality-gates.md` (closing
    FR-13), SKILL.md's "Growing child skills" section, step-3 house-procedure
    reads in both prompts, the smith's Phase note removed.
+
+### Post-Phase-4 — field fixes from the first live session  ✅ shipped (issue #7, PR #8)
+*Amendment A8.* The first real end-to-end run surfaced two P0s (a pipefail
+bug killing every scheduled `start` on clones without `origin/HEAD`; the
+cached install running 12 commits stale, silently) plus eight follow-ons.
+All fixed and regression-tested; A8 records the reasoning. New machinery a
+future session should know exists: `remote_cycle.sh refresh-skill` (run
+before every remote cycle), `skill-rev=` lines in `log.md`, and release
+*reasons* on the `zettel/lock` branch (`start-failed` / `empty-cycle` /
+`already-merged` / `finished <branch>` / `abort` / `stale-broken`) — the
+first places to look when diagnosing a run that did nothing.
+
+### Handoff — next steps (operational, not code)
+
+The plugin code is done and green (333 tests, smoke exit 0, strict validate).
+What remains happens in the *environment* and the *content repo*, not here:
+
+1. **One-time: bring the cached install current.** Scheduled runs pick up
+   PR #8 only after `/opt/zettel-skill` fast-forwards once —
+   `git -C /opt/zettel-skill fetch origin main && git -C /opt/zettel-skill
+   merge --ff-only origin/main` — or the environment cache rebuilds. From
+   then on the prompt-driven `refresh-skill` keeps it current automatically.
+2. **Update the Routine's pasted prompt** to the current
+   `scripts/remote_maintenance_prompt.md`: it gained the refresh-skill
+   opening step, the named-agent self-review fallback, step-3 approved-skill
+   reads, and the step-7 strict sandbox check + auto-trial.
+3. **Re-copy `ci/content-repo-gates.yml` into the content repo** as
+   `.github/workflows/gates.yml`: it gained the two Phase-4 gate steps
+   (`lint_skills.py`, `check_skill_sandbox.py`) and `fetch-depth: 0` on the
+   content checkout, which the sandbox gate's merge-base needs.
+4. **The live handoff check** — capture an inquiry, let the next scheduled
+   Routine pick it up, confirm it lands `answered` with a `result_notes`
+   backlink. Still the only end-to-end test of the human → scheduled-run
+   path against a real cycle (everything else is stub-proven). A
+   skill-smith-due cycle doubles as the live test of the Phase-4 proposal
+   flow: expect a proposal under the content repo's `skills/`, a `proposed`
+   + `trial` record in `skill-impact.md`, and a human
+   `skill_review.py promote|reject` decision waiting.
 
 ---
 
