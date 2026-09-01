@@ -23,9 +23,32 @@ maintenance prompt delegates to them by name).
 
 The `.md` files declare tier **defaults** as aliases (`opus` = strong,
 `haiku` = cheap). At run time, `config.yml`'s `models: {strong, cheap}` is
-authoritative: `python -m zettel_lib.agents --repo <repo>` re-emits every agent
-with the configured model, and `maintenance_run.sh` passes that JSON to
-`claude --agents`. Changing tiers is a config edit, not an agent-file edit.
+authoritative. Changing tiers is a config edit, not an agent-file edit — but
+the two execution paths consume agents differently, so config reaches each by
+its own route:
+
+| Path | How agents are supplied | How config reaches them |
+|---|---|---|
+| Laptop (`maintenance_run.sh`) | `--agents` JSON on a headless `claude -p` | `agents_json()` substitutes the models and the wrapper passes the JSON |
+| Remote (session-as-agent) | the registry in `~/.claude/agents/` | `remote_cycle.sh start` calls `materialize()`, rewriting each registered file's `model:` with the resolved ID |
+
+Both resolve through the same `resolved_models()`, so the JSON the laptop path
+sends and the files the remote path reads cannot drift.
+
+**The remote half is newer than the docs above it, and the gap it closed was
+silent.** `ci/setup-environment.sh` symlinks the agent files into the registry,
+so the session read the checked-in *alias* — cheap-tier agents ran Haiku no
+matter what `config.yml` said, and nothing reported the discrepancy.
+`materialize()` works because Claude Code watches the agents directory: a
+rewrite during `start` reaches that same session's later delegations. Two rules
+in that function are load-bearing — it only rewrites files that are **already**
+registered (so running `start` on a laptop never conjures a registry), and it
+**unlinks before writing**, because those entries are symlinks into the plugin
+tree and writing through one would edit the skill repo itself.
+
+Do not "fix" a cheap-tier agent by changing its alias to `sonnet`: that maps to
+**strong** in `TIER_BY_ALIAS`, which silently promotes the agent. The alias
+names a tier; `config.yml` names the model.
 
 ## Critic thresholds (QA-1)
 

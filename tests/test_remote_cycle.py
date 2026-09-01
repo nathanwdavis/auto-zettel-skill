@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -41,13 +42,19 @@ def content_repo(tmp_path):
     return repo, origin
 
 
-def cycle(repo, *args, holder="test-run"):
+def cycle(repo, *args, holder="test-run", agents_dir=None):
     # ZETTEL_SKILL_REFRESHED tells start its self-refresh already ran: these
     # tests run the REAL dev checkout's script, and a refresh here would fetch
     # from GitHub and fast-forward the developer's working copy. The refresh
     # path is exercised against throwaway installs in the refresh tests below.
+    #
+    # ZETTEL_AGENTS_DIR is the same class of hazard for the other direction:
+    # start materializes the agent registry, and unset this would rewrite the
+    # developer's own ~/.claude/agents. Default it inside the test's tmp_path.
     env = {**os.environ, "PYTHON": sys.executable, "ZETTEL_RUN_HOLDER": holder,
-           "ZETTEL_SKILL_REFRESHED": "1"}
+           "ZETTEL_SKILL_REFRESHED": "1",
+           "ZETTEL_AGENTS_DIR": str(agents_dir
+                                    or Path(repo).parent / "claude-agents")}
     return subprocess.run([str(SCRIPT), *args, "--repo", str(repo)],
                           capture_output=True, text=True, env=env)
 
@@ -81,6 +88,48 @@ def test_start_prints_only_the_branch_on_stdout(content_repo):
     result = cycle(repo, "start")
     assert result.stdout.strip().startswith("zettel/run-")
     assert "\n" not in result.stdout.strip()
+
+
+def test_start_resolves_the_agent_registry_from_config(content_repo, tmp_path):
+    """config.yml's tiers must reach the REMOTE path too. The registry holds
+    the checked-in aliases, so without this a cheap-tier agent ran Haiku
+    whatever config.yml said -- config only reached the laptop path."""
+    repo, _ = content_repo
+    registry = tmp_path / "agents"
+    registry.mkdir()
+    plugin_agents = PLUGIN_ROOT / "agents"
+    for path in plugin_agents.glob("*.md"):
+        (registry / path.name).symlink_to(path)
+    before = {p: p.read_bytes() for p in plugin_agents.glob("*.md")}
+
+    result = cycle(repo, "start", agents_dir=registry)
+    assert result.returncode == 0, result.stderr
+
+    critic = (registry / "critic.md").read_text(encoding="utf-8")
+    researcher = (registry / "researcher.md").read_text(encoding="utf-8")
+    assert "model: claude-opus-5" in critic
+    assert "model: claude-sonnet-5" in researcher
+    for path, original in before.items():
+        assert path.read_bytes() == original, "the plugin tree must be untouched"
+
+
+def test_start_survives_an_unresolvable_agent_registry(content_repo, tmp_path):
+    """Advisory, like the skill refresh: a cycle on alias-resolved models beats
+    no cycle, and stdout stays branch-only whatever happens here."""
+    repo, _ = content_repo
+    registry = tmp_path / "agents"
+    registry.mkdir()
+    (registry / "critic.md").symlink_to(PLUGIN_ROOT / "agents" / "critic.md")
+    config = repo / "config.yml"
+    config.write_text(
+        config.read_text(encoding="utf-8").replace("models:", "models_disabled:"),
+        encoding="utf-8")
+
+    result = cycle(repo, "start", agents_dir=registry)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().startswith("zettel/run-")
+    assert "\n" not in result.stdout.strip()
+    assert "warning" in result.stderr
 
 
 def test_second_container_stands_down_with_exit_3(content_repo, tmp_path):

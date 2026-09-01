@@ -63,7 +63,7 @@ def test_agents_json_resolves_models_from_config(clean_repo):
     for name, spec in payload.items():
         expected_tier = "strong" if name in STRONG else "cheap"
         expected_model = ("claude-opus-5" if expected_tier == "strong"
-                          else "claude-haiku-4-5-20251001")
+                          else "claude-sonnet-5")
         assert spec["model"] == expected_model, name
         assert spec["description"] and spec["prompt"] and spec["tools"]
 
@@ -75,6 +75,78 @@ def test_agents_json_hard_fails_on_missing_models_key(clean_repo):
     (clean_repo / "config.yml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
     with pytest.raises(Exception, match="models"):
         agents_mod.agents_json(ContentRepo(clean_repo))
+
+
+# --- materialize: config.yml reaches the remote path's registry ---------------
+
+def _registry(tmp_path):
+    """A registry as ci/setup-environment.sh builds it: symlinks into the plugin."""
+    dest = tmp_path / "agents"
+    dest.mkdir()
+    for path in AGENTS_DIR.glob("*.md"):
+        (dest / path.name).symlink_to(path)
+    return dest
+
+
+def test_materialize_writes_the_configured_model_per_tier(clean_repo, tmp_path):
+    dest = _registry(tmp_path)
+    written = agents_mod.materialize(ContentRepo(clean_repo), dest)
+
+    assert {p.name for p in written} == {f"{n}.md" for n in EXPECTED}
+    for name in EXPECTED:
+        meta = agents_mod.parse_agent(dest / f"{name}.md")
+        expected = ("claude-opus-5" if name in STRONG else "claude-sonnet-5")
+        assert meta["model"] == expected, name
+        # Everything else must survive: a rewritten definition the session
+        # delegates to is useless without its prompt and tools.
+        source = agents_mod.parse_agent(AGENTS_DIR / f"{name}.md")
+        assert meta["_prompt"] == source["_prompt"]
+        assert meta["tools"] == source["tools"]
+        assert meta["description"] == source["description"]
+
+
+def test_materialize_never_writes_through_the_symlink(clean_repo, tmp_path):
+    """The registry entries point INTO THE PLUGIN TREE. Writing through one
+    would edit the skill repo itself -- what FR-37 forbids and what
+    maintenance_run.sh's snapshot check exists to catch."""
+    dest = _registry(tmp_path)
+    before = {p: p.read_bytes() for p in AGENTS_DIR.glob("*.md")}
+
+    agents_mod.materialize(ContentRepo(clean_repo), dest)
+
+    for path, original in before.items():
+        assert path.read_bytes() == original, f"{path} was modified in place"
+    for entry in dest.glob("*.md"):
+        assert not entry.is_symlink(), f"{entry} is still a symlink"
+
+
+def test_materialize_only_touches_files_already_registered(clean_repo, tmp_path):
+    """Scoped to registries setup-environment.sh built: running start on a
+    laptop must not conjure an agent registry nobody asked for."""
+    dest = tmp_path / "agents"
+    dest.mkdir()
+    (dest / "critic.md").symlink_to(AGENTS_DIR / "critic.md")
+
+    written = agents_mod.materialize(ContentRepo(clean_repo), dest)
+
+    assert [p.name for p in written] == ["critic.md"]
+    assert {p.name for p in dest.iterdir()} == {"critic.md"}
+
+
+def test_materialize_leaves_only_the_model_line_changed(clean_repo, tmp_path):
+    dest = _registry(tmp_path)
+    agents_mod.materialize(ContentRepo(clean_repo), dest)
+
+    source = (AGENTS_DIR / "researcher.md").read_text(encoding="utf-8").splitlines()
+    written = (dest / "researcher.md").read_text(encoding="utf-8").splitlines()
+    differing = [(a, b) for a, b in zip(source, written) if a != b]
+    assert len(source) == len(written)
+    assert differing == [("model: haiku", "model: claude-sonnet-5")]
+
+
+def test_rewrite_model_rejects_a_definition_without_one():
+    with pytest.raises(agents_mod.AgentDefinitionError):
+        agents_mod.rewrite_model("---\nname: x\n---\nbody\n", "claude-opus-5")
 
 
 def test_skill_smith_prompt_carries_the_fr37_rails():

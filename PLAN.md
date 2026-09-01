@@ -235,9 +235,44 @@ fixed here:
    nothing else in the pipeline told the human a promote/reject decision was
    waiting.
 
+### Post-Phase-4 round 4 — config.yml reaches the remote path's agents  ✅ shipped
+
+*No amendment: this implements AC-29 on the second path, it does not deviate.*
+
+`AC-29` says "strong/cheap tiers are read from config.yml", and
+`orchestra.md` told readers "changing tiers is a config edit". **That was true
+of the laptop path only.** `agents_json()` is consumed solely by
+`maintenance_run.sh`; the remote path delegates to the registry
+`ci/setup-environment.sh` symlinks from the plugin, so the session read the
+checked-in *alias* and cheap-tier agents ran Haiku whatever the content repo
+configured. Since the Routine is the primary driver, `models:` was effectively
+inert for agent selection — and nothing reported the discrepancy.
+
+What shipped:
+1. `zettel_lib.agents.materialize()` rewrites each **already-registered**
+   definition's `model:` line with the ID `config.yml` resolves, sharing
+   `resolved_models()` with `agents_json()` so the two paths cannot drift.
+   It **unlinks before writing** — the registry entries are symlinks into the
+   plugin tree, and writing through one would edit the skill repo (FR-37).
+2. `remote_cycle.sh start` calls it after the pull, advisory and stderr-only
+   like the skill refresh, logging the resolved models to `log.md`. In the
+   script rather than the prompt, for the frozen-prompt reason. It works
+   because Claude Code *watches* the agents directory: the rewrite reaches
+   that same session's later delegations.
+3. The standard is now `strong: claude-opus-5` / `cheap: claude-sonnet-5` in
+   `templates/config.yml` and the test fixture.
+
+**Tests to keep**: the model-per-tier rewrite; that the plugin tree comes back
+byte-identical and no entry is left a symlink; that an unregistered directory
+is skipped rather than populated; and that `start` still exits 0 with
+branch-only stdout when the registry cannot be resolved. `cycle()` and
+`smoke_test.sh` export `ZETTEL_AGENTS_DIR` — without it a test run rewrites the
+developer's own `~/.claude/agents`, the same hazard class as
+`ZETTEL_SKILL_REFRESHED`.
+
 ### Handoff — next steps (operational, not code)
 
-The plugin code is done and green (340 tests, smoke exit 0, strict validate).
+The plugin code is done and green (347 tests, smoke exit 0, strict validate).
 What remains happens in the *environment* and the *content repo*, not here.
 
 **Done** (2026-09-01): the content repo's GitHub settings are now set —
@@ -289,7 +324,7 @@ agent holds the lock and is already mid-merge.
 
 ## 3. Testing & definition of done
 
-The §12 checklist is the definition of done, run before final commit of each phase and in full before v1. `smoke_test.sh` orchestrates every item that works without network or `gh`; the pytest suite currently stands at **340 tests**.
+The §12 checklist is the definition of done, run before final commit of each phase and in full before v1. `smoke_test.sh` orchestrates every item that works without network or `gh`; the pytest suite currently stands at **347 tests**.
 
 Fixtures are **built programmatically** in `tests/conftest.py`, not checked in as static files, so every violation fixture is provably "the clean repo with exactly one thing broken" and the reference note's Chicago strings stay self-consistent with its CSL-JSON.
 

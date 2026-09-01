@@ -109,6 +109,16 @@ labor is now:
   `start` runs current code, whatever its stored prompt says. Existing
   Routines created before *this* fix still run a stale `start`, so update or
   recreate them once; from then on the property holds structurally.
+- **`start` also resolves the agent registry from `config.yml`.** The setup
+  script symlinks `agents/*.md` into `~/.claude/agents/`, so a session read the
+  checked-in tier *alias* and cheap-tier agents ran Haiku whatever the content
+  repo configured — `models: {strong, cheap}` only ever reached the laptop
+  path's `--agents` JSON. `start` now rewrites each registered definition with
+  the resolved model ID (Claude Code watches that directory, so it applies to
+  the same session), replacing the symlinks with regular files so the plugin
+  tree is never written through. Advisory: a failure warns and the cycle
+  continues on the aliases. `ZETTEL_AGENTS_DIR` overrides the target, which is
+  how the tests and `smoke_test.sh` stay off a developer's real registry.
 - **`ZETTEL_SKILL_REF` still pins deliberately.** Point it at a tag and
   refresh-skill fast-forwards within that ref only; bumping the tag remains a
   release step.

@@ -17,7 +17,7 @@ variables. `.gitignore` covers `.env`, `*.token`, `*.pem`, `.netrc`, `run.lock`.
 ## Running things
 
 ```sh
-.venv/bin/python -m pytest -q      # 340 tests, ~135s
+.venv/bin/python -m pytest -q      # 347 tests, ~135s
 ./smoke_test.sh                    # pytest + end-to-end scaffold; exit 0 or it isn't done
 claude plugin validate --strict .
 ```
@@ -97,6 +97,13 @@ tidy document. `PLAN.md` tracks phase status and the build order.
   installed `start` does not contain the self-refresh, so after changing that
   code path someone must update or recreate the Routine so its prompt runs
   `refresh-skill` one more time.
+- **The agent registry is symlinks into the plugin tree.**
+  `ci/setup-environment.sh` links `agents/*.md` into `~/.claude/agents/`, so
+  anything that rewrites a registered definition must `unlink` first: writing
+  through the symlink edits the *skill repo*, which `maintenance_run.sh`'s
+  snapshot check treats as a violation and FR-37 forbids.
+  `zettel_lib.agents.materialize()` is the one writer, and
+  `test_materialize_never_writes_through_the_symlink` is what keeps it honest.
 - `rsync` is not installed (use `tar`). `pip install --upgrade pip` hard-fails
   on the Debian system pip, which is why `ci/setup-environment.sh` skips it.
 
