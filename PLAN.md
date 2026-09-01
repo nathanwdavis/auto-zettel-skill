@@ -3,7 +3,7 @@
 **Source of truth:** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (all FR-x / AC-x / NFR-x / QA-x / checklist references below point there). Deviations forced by implementation are recorded there as numbered amendments — **A1–A8** so far.
 **Working on this repo:** [`.claude/CLAUDE.md`](.claude/CLAUDE.md) — how to run the suite, the environment's sharp edges, and the conventions.
 **This repo:** the skill repo. It contains ONLY the `zettel-bootstrap` plugin — never zettelkasten content. The content repo is created at genesis runtime by `init_content_repo.sh` and is out of scope for this repo's file tree. Both repos are public (A4); nothing here may contain a secret (NFR-4).
-**Status:** All phases complete — 1, 2, 3, 3.5, 3.6 (PR #5), 4 (PR #6) — plus the post-Phase-4 field-fix round from the first live end-to-end session (issue #7 → PR #8, amendment A8). Every §12 checklist item passes. What remains is operational, not code: see **Handoff — next steps** at the end of §2.
+**Status:** All phases complete — 1, 2, 3, 3.5, 3.6 (PR #5), 4 (PR #6) — plus two rounds of field fixes from live scheduled runs: issue #7 → PR #8 (amendment A8), and the stale-install/frozen-prompt round → PR #10. Every §12 checklist item passes. What remains is operational, not code: see **Handoff — next steps** at the end of §2.
 
 ---
 
@@ -175,38 +175,99 @@ before every remote cycle), `skill-rev=` lines in `log.md`, and release
 `already-merged` / `finished <branch>` / `abort` / `stale-broken`) — the
 first places to look when diagnosing a run that did nothing.
 
+### Post-Phase-4 round 2 — the stale install, seen from the content repo  ✅ shipped (PR #10)
+*No amendment: A8 already covers install currency; this hardens its mechanism.*
+A review bot on a content-repo PR flagged that `manifest.json` had lost its
+`inquiries` section. The finding was real and the cause was not in
+`build_manifest.py`, which has emitted `inquiries` since 4767f61 — the cycle
+ran a **stale cached install** predating it (its `start` line carries no
+`skill-rev=`, which is the tell). A8's `refresh-skill` existed and never ran,
+because **a Routine's stored prompt freezes at creation** and that Routine
+predated the template line. Freshness was resting on a file the failing path
+could not read.
+
+Then it repeated, worse: the next cycle hit the same failure, took the
+`--check` error's advice literally, re-ran `build_manifest.py` (its own
+generator being the stale thing), failed again, and hand-wrote an inquiries
+block in a guessed schema **twice** — ~35 minutes — before finding the cache.
+Both that patch and the review bot's guessed the same wrong shape.
+
+What shipped:
+1. `remote_cycle.sh start` self-refreshes and **re-execs** the refreshed script
+   when HEAD moved (`refresh_skill_checkout`, shared with the subcommand). The
+   exec is a process boundary so bash never keeps reading a mutated file;
+   `ZETTEL_SKILL_REFRESHED` prevents a loop. Advisory: it never fails a cycle,
+   and `start`'s stdout stays branch-only.
+2. `finish` writes the PR-handoff line itself, pre-commit so it lands on the
+   pushed branch — agents were paraphrasing it as "(gh unavailable)", which
+   reads as GitHub being down rather than the CLI being absent.
+3. `build_manifest.py --check` names the stale-install cause and rules out the
+   hand-edit. The old message told a run to do the thing that made it worse.
+4. The remote prompt arms auto-merge via the MCP tools; `remote-execution.md`
+   gains the one-time content-repo settings checklist.
+
+**Tests to keep**: `start` re-execs onto refreshed code (a sentinel stub
+upstream proves the *refreshed* file continues the run); `start` on a current
+install proceeds without re-exec and still prints only the branch. Both
+`tests/test_remote_cycle.py`'s `cycle()` helper and `smoke_test.sh` export
+`ZETTEL_SKILL_REFRESHED=1` — without it a test run would fetch and
+fast-forward the developer's own checkout.
+
 ### Handoff — next steps (operational, not code)
 
-The plugin code is done and green (333 tests, smoke exit 0, strict validate).
-What remains happens in the *environment* and the *content repo*, not here:
+The plugin code is done and green (337 tests, smoke exit 0, strict validate).
+What remains happens in the *environment* and the *content repo*, not here.
 
-1. **One-time: bring the cached install current.** Scheduled runs pick up
-   PR #8 only after `/opt/zettel-skill` fast-forwards once —
-   `git -C /opt/zettel-skill fetch origin main && git -C /opt/zettel-skill
-   merge --ff-only origin/main` — or the environment cache rebuilds. From
-   then on the prompt-driven `refresh-skill` keeps it current automatically.
-2. **Update the Routine's pasted prompt** to the current
-   `scripts/remote_maintenance_prompt.md`: it gained the refresh-skill
-   opening step, the named-agent self-review fallback, step-3 approved-skill
-   reads, and the step-7 strict sandbox check + auto-trial.
-3. **Re-copy `ci/content-repo-gates.yml` into the content repo** as
-   `.github/workflows/gates.yml`: it gained the two Phase-4 gate steps
-   (`lint_skills.py`, `check_skill_sandbox.py`) and `fetch-depth: 0` on the
-   content checkout, which the sandbox gate's merge-base needs.
-4. **The live handoff check** — capture an inquiry, let the next scheduled
+**Done** (2026-09-01): the content repo's GitHub settings are now set —
+`gates` is a **required status check** on `main`, "Allow auto-merge" and
+"Automatically delete head branches" are on. Before that a red PR merged on a
+click, which is how a failing manifest check reached `main` twice.
+
+**Still open, in priority order:**
+
+1. **Update or recreate the Routine so its prompt is current.** This is the
+   critical path and PR #10 does not do it: a stale installed `start` does not
+   contain the self-refresh, so the Routine's stored prompt must run
+   `refresh-skill` once to bootstrap the new code into place. After that single
+   hop, freshness holds structurally. The current template also carries the
+   named-agent self-review fallback, step-3 approved-skill reads, the step-7
+   sandbox check + auto-trial, and the auto-merge instruction — none of which
+   reach a Routine created before them. **A prompt-only fix is not a fix for
+   existing Routines** (see `.claude/CLAUDE.md`, "A Routine's prompt freezes").
+2. **Re-copy `ci/content-repo-gates.yml` into the content repo** as
+   `.github/workflows/gates.yml`. *Verified still stale on 2026-09-01*: the
+   installed copy is missing `fetch-depth: 0` on the content checkout and both
+   Phase-4 steps (`lint_skills.py`, `check_skill_sandbox.py`). Until this is
+   re-copied the skill-emergence rails are **not enforced server-side** — a
+   smith proposal would reach `main` ungated, and the sandbox gate's merge-base
+   needs the full fetch depth.
+3. **The live handoff check** — capture an inquiry, let the next scheduled
    Routine pick it up, confirm it lands `answered` with a `result_notes`
-   backlink. Still the only end-to-end test of the human → scheduled-run
-   path against a real cycle (everything else is stub-proven). A
-   skill-smith-due cycle doubles as the live test of the Phase-4 proposal
-   flow: expect a proposal under the content repo's `skills/`, a `proposed`
-   + `trial` record in `skill-impact.md`, and a human
-   `skill_review.py promote|reject` decision waiting.
+   backlink. Still the only end-to-end test of the human → scheduled-run path
+   against a real cycle (everything else is stub-proven). A skill-smith-due
+   cycle doubles as the live test of the Phase-4 proposal flow: expect a
+   proposal under the content repo's `skills/`, a `proposed` + `trial` record
+   in `skill-impact.md`, and a human `skill_review.py promote|reject` decision
+   waiting.
+
+**Diagnosing a run that misbehaved**, in the order that has actually worked:
+the `start` line's `skill-rev=` (absent or old ⇒ stale install, and suspect
+everything downstream), release *reasons* on the `zettel/lock` branch
+(`start-failed` / `empty-cycle` / `already-merged` / `finished <branch>` /
+`abort` / `stale-broken`), then `log.md`'s per-step lines. A cycle that "did
+nothing" is usually a stand-down, not a crash.
+
+**One process note.** Do not tell a review bot to resolve merge conflicts on a
+maintenance PR. It happened once: the bot pushed its own merge while the
+cycle's merge was in flight, and its resolution silently dropped a paragraph of
+INBOX research findings that the cycle then had to reconcile by hand. The cycle
+agent holds the lock and is already mid-merge.
 
 ---
 
 ## 3. Testing & definition of done
 
-The §12 checklist is the definition of done, run before final commit of each phase and in full before v1. `smoke_test.sh` orchestrates every item that works without network or `gh`; the pytest suite currently stands at **333 tests**.
+The §12 checklist is the definition of done, run before final commit of each phase and in full before v1. `smoke_test.sh` orchestrates every item that works without network or `gh`; the pytest suite currently stands at **337 tests**.
 
 Fixtures are **built programmatically** in `tests/conftest.py`, not checked in as static files, so every violation fixture is provably "the clean repo with exactly one thing broken" and the reference note's Chicago strings stay self-consistent with its CSL-JSON.
 
@@ -245,7 +306,7 @@ Added after the spec was written, and enforced by `smoke_test.sh` steps 8b–8e:
 
 **Still live:**
 
-- ~~**`ci/setup-environment.sh` is cached per environment.**~~ — **fired live** (issue #7): a scheduled session ran 12 commits stale, silently. The cache is now only the bootstrap; `remote_cycle.sh refresh-skill` fast-forwards the install before every remote cycle, and every `start`/`finish` logs the skill revision (A8). Pinning `ZETTEL_SKILL_REF` to a tag still freezes runs deliberately.
+- ~~**`ci/setup-environment.sh` is cached per environment.**~~ — **fired live twice.** First as issue #7: a scheduled session ran 12 commits stale, silently. The cache became the bootstrap only, with `refresh-skill` fast-forwarding before each cycle and `skill-rev=` on every `start`/`finish` (A8). It then fired *again* through a gap A8 left: `refresh-skill` was invoked from the prompt, and **a Routine's prompt freezes at creation**, so Routines predating the line never ran it — two cycles regenerated `manifest.json` on stale code and hand-patched the gate to match. Closed by PR #10: `start` refreshes and re-execs itself, so the mechanism no longer depends on prompt text. Residual risk is now one manual hop (bootstrapping a Routine whose installed `start` predates the self-refresh) and deliberate pinning via `ZETTEL_SKILL_REF`.
 - **Server-side `web_fetch` URL-origin restriction**: skill-embedded URLs are not fetchable on claude.ai/API — the FR-31 five-path design is mandatory, with `fetch_remote.py` as the primary container-side mechanism.
 - **Private content repo + Mode B**: requires authenticated GitHub MCP; must be configured and tested before Phase 2 sign-off if the user needs private Mode B.
 - **Crossref rate limits** (revised effective 2025-12-01): always send `mailto`, back off on 429.

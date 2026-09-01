@@ -17,7 +17,7 @@ variables. `.gitignore` covers `.env`, `*.token`, `*.pem`, `.netrc`, `run.lock`.
 ## Running things
 
 ```sh
-.venv/bin/python -m pytest -q      # 333 tests, ~130s
+.venv/bin/python -m pytest -q      # 337 tests, ~135s
 ./smoke_test.sh                    # pytest + end-to-end scaffold; exit 0 or it isn't done
 claude plugin validate --strict .
 ```
@@ -42,6 +42,17 @@ every file in a content repo is well-formed, which the manifest, both lints,
 and Mode-B remote access all depend on. Generating well-formed artifacts
 (`scripts/capture.py`) cost one script and kept the invariant. Prefer that
 shape of fix.
+
+**It recurred from the other direction, and cost two cycles.** A run on a stale
+install regenerated `manifest.json` without its `inquiries` block; CI's
+`build_manifest.py --check` — running current code — rejected it. Two different
+agents then "fixed" the gate by hand-writing an inquiries block to match, and
+both guessed the same wrong schema (`id`/`slug`/`tags`/`url_or_apipath`, no
+`priority`, unsorted `result_notes`). `main` sat red across two merges. What
+worked was refreshing the install and re-running the generator. **Matching a
+gate by hand is the same error as relaxing it**: a generated artifact is
+whatever the tool emits, and any hand-authored version is a guess that the next
+regeneration silently discards.
 
 ## Where the rules live
 
@@ -72,7 +83,20 @@ tidy document. `PLAN.md` tracks phase status and the build order.
   `/opt/zettel-skill` install can be arbitrarily stale — both bit live runs
   (issue #7, amendment A8). Default-branch probes must be pipefail-safe, and
   `remote_cycle.sh refresh-skill` is the currency mechanism; do not "verify"
-  install freshness with presence checks.
+  install freshness with presence checks. Since PR #10, `start` runs that
+  refresh itself and re-execs when HEAD moves, so currency no longer depends on
+  the prompt remembering to ask — but see the next bullet for the one hop that
+  still needs a human.
+- **A Routine's prompt freezes at creation time.** This is the sharpest edge in
+  the whole system and it has bitten twice. Editing
+  `scripts/remote_maintenance_prompt.md` changes nothing for Routines that
+  already exist — they keep sending the text they were created with, forever.
+  So a fix that lives *only* in the prompt reaches new Routines and no others.
+  Put anything load-bearing in the scripts, where a stale install can at least
+  fast-forward to it. The bootstrap is unavoidably manual exactly once: a stale
+  installed `start` does not contain the self-refresh, so after changing that
+  code path someone must update or recreate the Routine so its prompt runs
+  `refresh-skill` one more time.
 - `rsync` is not installed (use `tar`). `pip install --upgrade pip` hard-fails
   on the Debian system pip, which is why `ci/setup-environment.sh` skips it.
 
