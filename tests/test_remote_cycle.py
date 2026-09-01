@@ -439,6 +439,26 @@ def test_finish_without_gh_logs_the_canonical_handoff_line(content_repo):
                                capture_output=True, text=True, check=True).stdout
     assert canonical in committed, "the line must land ON the pushed branch"
     assert "PUSHED_BRANCH=" in result.stdout
+    # Arming auto-merge is part of the handoff: without this instruction an
+    # ad-hoc session's PR goes green and then just sits, waiting for a click.
+    assert "enable auto-merge" in result.stdout
+    assert "never merge it yourself" in result.stdout
+
+
+def test_finish_surfaces_proposed_skills_awaiting_a_decision(content_repo):
+    """A proposal only advances when a human promotes or rejects it; nothing
+    else in the pipeline says one is waiting, so the handoff must."""
+    from conftest import plant_skill
+
+    repo, _ = content_repo
+    cycle(repo, "start")
+    plant_skill(repo, "planted-proposal", status="proposed")
+    plant_skill(repo, "already-approved", status="approved",
+                proposal_id="209901010101")
+    result = cycle(repo, "finish")
+    assert result.returncode == 0, result.stderr
+    assert "awaiting a human decision: planted-proposal" in result.stdout
+    assert "already-approved" not in result.stdout
 
 
 def test_help_and_bad_subcommand(content_repo):

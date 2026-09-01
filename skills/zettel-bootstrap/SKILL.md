@@ -68,8 +68,10 @@ pbpaste | scripts/capture.py --repo <repo> fleeting "Clipped" --body -
 ```
 
 It generates a well-formed artifact — key, id, frontmatter, timestamps — that
-passes every gate as written. Editing `INBOX.md` by hand is also fine; it is
-prose, not frontmatter.
+passes every gate as written, and rebuilds `manifest.json` so a capture-only
+commit still passes the manifest-currency gate on its PR. Editing `INBOX.md`
+by hand is also fine; it is prose, not frontmatter, and the manifest does not
+index it.
 
 An **inquiry** is an open question, tracked across runs (`new` → `in-progress`
 → `answered` → `archived`). A run works the `new` ones first. List them with
@@ -104,8 +106,11 @@ to get right:
   `status` and, when notes were written, `result_notes`.
 
 Hand off with `scripts/remote_cycle.sh finish --repo <repo> --title "..."`.
-**An ad-hoc session never pushes to `main` and never merges.** The required
-check decides. See `references/capture.md`.
+If `finish` says to open the PR yourself (no `gh` in the container), open it
+with the GitHub MCP tools and enable auto-merge on it (squash) so it lands
+exactly when the required check passes. **An ad-hoc session never pushes to
+`main` and never merges** — auto-merge is not merging; the check remains the
+authority. See `references/capture.md`.
 
 ## Adding knowledge
 

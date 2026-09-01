@@ -213,9 +213,31 @@ install proceeds without re-exec and still prints only the branch. Both
 `ZETTEL_SKILL_REFRESHED=1` — without it a test run would fetch and
 fast-forward the developer's own checkout.
 
+### Post-Phase-4 round 3 — use-case review fixes  ✅ shipped
+
+A walkthrough of the three end-to-end use cases (ad-hoc question → auto-merged
+PR; laptop captures → next Routine; skill emergence) found three gaps, all
+fixed here:
+
+1. **`capture.py` rebuilds the manifest** (via `build_manifest.regenerate()`,
+   the now-shared write path) after fleeting and inquiry captures. The required
+   `gates` check exposed this: a capture changes what the manifest indexes, so
+   a capture-only PR without a rebuild failed manifest-currency and could not
+   merge. Inbox captures skip it (INBOX is not indexed). Best-effort: breakage
+   that predates the capture warns instead of eating it.
+2. **Ad-hoc handoffs arm auto-merge.** `finish`'s no-`gh` output (and SKILL.md's
+   "Answering a question now") now says to enable auto-merge (squash) after
+   opening the PR via MCP — previously only the maintenance prompt did, so an
+   ad-hoc PR from a remote session went green and sat unmerged.
+3. **Pending skill proposals are surfaced.** `finish` prints the `skills/*/`
+   directories whose PURPOSE.md says `status: proposed`, and the prompt tells
+   the session to name them (with trial scores) in the PR body and report —
+   nothing else in the pipeline told the human a promote/reject decision was
+   waiting.
+
 ### Handoff — next steps (operational, not code)
 
-The plugin code is done and green (337 tests, smoke exit 0, strict validate).
+The plugin code is done and green (340 tests, smoke exit 0, strict validate).
 What remains happens in the *environment* and the *content repo*, not here.
 
 **Done** (2026-09-01): the content repo's GitHub settings are now set —
@@ -267,7 +289,7 @@ agent holds the lock and is already mid-merge.
 
 ## 3. Testing & definition of done
 
-The §12 checklist is the definition of done, run before final commit of each phase and in full before v1. `smoke_test.sh` orchestrates every item that works without network or `gh`; the pytest suite currently stands at **337 tests**.
+The §12 checklist is the definition of done, run before final commit of each phase and in full before v1. `smoke_test.sh` orchestrates every item that works without network or `gh`; the pytest suite currently stands at **340 tests**.
 
 Fixtures are **built programmatically** in `tests/conftest.py`, not checked in as static files, so every violation fixture is provably "the clean repo with exactly one thing broken" and the reference note's Chicago strings stay self-consistent with its CSL-JSON.
 
