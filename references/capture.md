@@ -36,7 +36,11 @@ pbpaste | scripts/capture.py --repo <repo> fleeting "Clipped" --body -
 ```
 
 `--json` prints `{"kind": …, "path": …}` for programmatic callers. Every capture
-appends a line to `log.md`.
+appends a line to `log.md`, and a fleeting or inquiry capture also rebuilds
+`manifest.json` and `.bib/refs.json` — the capture is what made them stale, and
+with the `gates` check required on `main`, a capture-only PR carrying a stale
+manifest cannot merge. Inbox captures skip the rebuild; `INBOX.md` is not
+indexed.
 
 Two details worth knowing:
 
@@ -116,7 +120,10 @@ scheduled one:
    (older than `STALE_LOCK_HOURS`, default 6) is broken.
 2. **Same branch.** Work goes on `zettel/run-<timestamp>`, never `main`.
 3. **Same gate.** `remote_cycle.sh finish` pushes the branch and hands off to
-   the required status check. An ad-hoc session never pushes to `main` and never
+   the required status check. Where `gh` exists it opens the PR and arms
+   auto-merge itself; where it does not (remote containers), open the PR with
+   the GitHub MCP tools and enable auto-merge (squash) so it lands exactly when
+   the check passes. An ad-hoc session never pushes to `main` and never
    merges. The check decides, and it cannot be talked out of it.
 
 The question is filed as an inquiry *before* any research, so a session that is

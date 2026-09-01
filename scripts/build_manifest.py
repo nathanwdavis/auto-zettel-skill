@@ -141,6 +141,28 @@ def serialize(manifest: dict) -> str:
     return json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
 
+def serialize_refs(refs: list[dict]) -> str:
+    return json.dumps(refs, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+
+
+def regenerate(repo: ContentRepo) -> dict:
+    """Build and write manifest.json and .bib/refs.json; returns the manifest.
+
+    The one write path for every entry point. capture.py calls this after a
+    fleeting or inquiry capture because the capture is what made the committed
+    manifest stale -- and with the content repo's `gates` check required, a
+    stale manifest in a capture-only PR cannot merge. Any hand-rolled second
+    writer would eventually drift from what --check expects, which is exactly
+    the hand-authored-artifact failure this file's --check hint warns about.
+    """
+    manifest = build(repo)
+    (repo.root / "manifest.json").write_text(serialize(manifest), encoding="utf-8")
+    refs_target = repo.root / ".bib" / "refs.json"
+    refs_target.parent.mkdir(parents=True, exist_ok=True)
+    refs_target.write_text(serialize_refs(build_refs(repo)), encoding="utf-8")
+    return manifest
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = base_parser(__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true",
@@ -148,22 +170,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     repo = open_repo(args.repo)
 
-    try:
-        manifest = build(repo)
-    except (FrontmatterError, ContentRepoError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return EXIT_USAGE
-
-    text = serialize(manifest)
-    target = repo.root / "manifest.json"
-
-    refs_text = json.dumps(build_refs(repo), indent=2, sort_keys=True,
-                           ensure_ascii=False) + "\n"
-    refs_target = repo.root / ".bib" / "refs.json"
-
     if args.check:
+        try:
+            manifest = build(repo)
+        except (FrontmatterError, ContentRepoError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return EXIT_USAGE
+        target = repo.root / "manifest.json"
+        refs_target = repo.root / ".bib" / "refs.json"
+        checks = ((target, serialize(manifest)),
+                  (refs_target, serialize_refs(build_refs(repo))))
         stale = []
-        for path, expected in ((target, text), (refs_target, refs_text)):
+        for path, expected in checks:
             current = path.read_text(encoding="utf-8") if path.exists() else ""
             if current != expected:
                 stale.append(repo.rel(path) if path.exists() else str(path.name))
@@ -185,11 +203,13 @@ def main(argv: list[str] | None = None) -> int:
         print("build_manifest: manifest.json and .bib/refs.json up to date")
         return EXIT_OK
 
-    target.write_text(text, encoding="utf-8")
-    refs_target.parent.mkdir(parents=True, exist_ok=True)
-    refs_target.write_text(refs_text, encoding="utf-8")
-    print(f"build_manifest: wrote {repo.rel(target)} ({manifest['note_count']} notes) "
-          f"and {repo.rel(refs_target)}")
+    try:
+        manifest = regenerate(repo)
+    except (FrontmatterError, ContentRepoError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    print(f"build_manifest: wrote manifest.json ({manifest['note_count']} notes) "
+          "and .bib/refs.json")
     repo.append_log(f"build_manifest: {manifest['note_count']} notes indexed")
     return EXIT_OK
 

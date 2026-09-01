@@ -313,6 +313,22 @@ print("yes" if ok else f"no\t{holder.holder}\t{holder.session}\t{holder.age_hour
       else
         echo "open a PR for $BRANCH so the gates can run -- use whatever GitHub tooling this session has (the GitHub MCP tools in remote sessions)"
       fi
+      echo "then enable auto-merge on it (squash) so it lands exactly when the required gates check passes; never merge it yourself"
+    fi
+
+    # A proposal advances only when a human promotes or rejects it, and nothing
+    # else in the pipeline says one is waiting: the smith records it, the trial
+    # scores it, and then it can sit unread in a merged PR forever. Say so here,
+    # where the session is composing its PR body and report.
+    PROPOSED_SKILLS=""
+    for PURPOSE_FILE in "$REPO"/skills/*/PURPOSE.md; do
+      [[ -f "$PURPOSE_FILE" ]] || continue
+      if grep -q '^status: proposed$' "$PURPOSE_FILE"; then
+        PROPOSED_SKILLS="${PROPOSED_SKILLS:+$PROPOSED_SKILLS, }$(basename "$(dirname "$PURPOSE_FILE")")"
+      fi
+    done
+    if [[ -n "$PROPOSED_SKILLS" ]]; then
+      echo "child-skill proposals awaiting a human decision: $PROPOSED_SKILLS -- name them and their trial scores in the PR body and your report (skill_review.py promote|reject decides)"
     fi
 
     release_lock "finished $BRANCH"

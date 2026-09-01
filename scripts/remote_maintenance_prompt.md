@@ -104,6 +104,11 @@ not merge it yourself. `finish` has already written the canonical handoff
 line to log.md; record the PR number in your report, not as another log.md
 paraphrase of that line.
 
+If `finish` lists child-skill proposals awaiting a human decision, name each
+one and its trial scores prominently in the PR body AND in your report — a
+proposal advances only when the human runs `skill_review.py promote` or
+`reject`, and this handoff is how they learn one is waiting.
+
 HARD RULES for this run:
 - **You never push to main and never merge.** Your output is a branch and a PR.
   The required status check is the authority, and you cannot bypass it.

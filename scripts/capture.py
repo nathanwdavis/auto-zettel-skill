@@ -8,8 +8,9 @@ a zettelkasten lives on -- the riskiest act in the system.
 
 This closes the gap from the other side. Rather than loosening the gates, it
 generates artifacts that already satisfy them: correct note key, full
-frontmatter, real timestamps. Usable by a human at a terminal, by an ad-hoc
-Claude session, or by the agents.
+frontmatter, real timestamps. Note captures also rebuild manifest.json, so a
+capture committed on its own still passes the manifest-currency gate. Usable
+by a human at a terminal, by an ad-hoc Claude session, or by the agents.
 
     capture.py --repo <path> fleeting "Title" [--body TEXT|-] [--tags a,b]
     capture.py --repo <path> inquiry  "Question" [--body TEXT|-] [--priority high]
@@ -26,6 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import build_manifest
 from zettel_lib import naming
 from zettel_lib.cli import EXIT_OK, EXIT_USAGE
 from zettel_lib.frontmatter import FrontmatterError, dump
@@ -183,6 +185,19 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_USAGE
 
     rel = repo.rel(path)
+    if args.kind != "inbox":
+        # This capture just changed what manifest.json indexes, and the content
+        # repo's required `gates` check rejects a stale manifest -- so a capture
+        # committed without a rebuild produces a PR that cannot merge. INBOX is
+        # not indexed, so inbox captures skip it. Best-effort on purpose: when
+        # the rebuild fails, the breakage predates this capture (this artifact
+        # is well-formed by construction) and must not eat the capture itself.
+        try:
+            build_manifest.regenerate(repo)
+        except (ContentRepoError, FrontmatterError, OSError) as exc:
+            print(f"warning: {rel} written, but the manifest could not be "
+                  f"rebuilt: {exc}\nfix that and re-run build_manifest.py "
+                  "before committing", file=sys.stderr)
     repo.append_log(f"capture: {args.kind} -> {rel}")
     print(json.dumps({"kind": args.kind, "path": rel}) if args.json else rel)
     return EXIT_OK

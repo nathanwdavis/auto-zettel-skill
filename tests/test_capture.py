@@ -109,6 +109,31 @@ def test_capture_is_logged(repo):
     assert "capture: fleeting" in (repo / "log.md").read_text(encoding="utf-8")
 
 
+def test_capture_leaves_the_manifest_current(repo):
+    """A capture changes what the manifest indexes, and the content repo's
+    required `gates` check rejects a stale manifest -- so a laptop capture
+    committed as-is must already pass --check, with nobody re-running the
+    generator by hand."""
+    for kind, title in (("inquiry", "Does capture keep the manifest current?"),
+                        ("fleeting", "A thought that must be indexed")):
+        result = capture(repo, kind, title)
+        assert result.returncode == 0, result.stderr
+        check = run_script("build_manifest.py", repo, "--check")
+        assert check.returncode == 0, f"stale after {kind} capture:\n{check.stderr}"
+
+
+def test_preexisting_breakage_warns_but_does_not_eat_the_capture(repo):
+    """Someone else's hand-written file must not make capture fail: the new
+    artifact is well-formed by construction, and the failure attribution the
+    tool exists for says the mess belongs to whoever made it."""
+    (repo / "fleeting" / "hand-written.md").write_text("Just a thought.\n",
+                                                      encoding="utf-8")
+    result = capture(repo, "inquiry", "Survives a broken neighbour?")
+    assert result.returncode == 0, result.stderr
+    assert (repo / result.stdout.strip()).exists()
+    assert "manifest could not be rebuilt" in result.stderr
+
+
 # --- identity under bursts ----------------------------------------------------
 
 def test_captures_in_the_same_minute_get_distinct_ids(repo):
