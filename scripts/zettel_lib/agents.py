@@ -173,9 +173,10 @@ def main(argv: list[str] | None = None) -> int:
                   f"cheap={models['cheap']})")
         else:
             print(agents_json(repo, args.agents_dir))
-    except (AgentDefinitionError, Exception) as exc:  # noqa: BLE001 - CLI boundary
-        if isinstance(exc, SystemExit):
-            raise
+    # AgentDefinitionError is already an Exception, and SystemExit is a
+    # BaseException -- it bypasses this handler and propagates on its own,
+    # which is what the guard that used to sit here was reaching for.
+    except Exception as exc:  # noqa: BLE001 - CLI boundary
         print(f"error: {exc}", file=sys.stderr)
         return 1
     return 0
