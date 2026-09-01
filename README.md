@@ -170,7 +170,16 @@ container-local lock file can't serialize two ephemeral containers), works on a
 `zettel/run-*` branch via `scripts/remote_cycle.sh`, and hands a PR to CI.
 `ci/content-repo-gates.yml`, installed in the content repo with `gates` as a
 **required status check**, decides what reaches `main` — enforcement no session
-can bypass. Full walkthrough: [`references/remote-execution.md`](references/remote-execution.md).
+can bypass.
+
+Three one-time settings on the content repo make that real, and the workflow
+alone does not: make **`gates` a required status check** on `main` (Settings →
+Rules → Rulesets), and enable **Allow auto-merge** and **Automatically delete
+head branches** (Settings → General → Pull Requests). Without the required
+check a red PR still merges on a click; without auto-merge every green run
+waits on a human; without branch deletion `zettel/run-*` branches accumulate,
+since sessions cannot delete remote branches. Full walkthrough:
+[`references/remote-execution.md`](references/remote-execution.md).
 
 ### Remote reading (Mode B)
 
@@ -241,7 +250,7 @@ pip install -r requirements-dev.txt
 ./smoke_test.sh
 ```
 
-`smoke_test.sh` runs the full pytest suite (333 tests) plus an end-to-end
+`smoke_test.sh` runs the full pytest suite (337 tests) plus an end-to-end
 genesis scaffold. To run pytest alone, use the virtualenv's interpreter —
 `pytest` is generally not installed in the system python:
 
