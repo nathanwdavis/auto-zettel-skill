@@ -51,7 +51,7 @@ CONFIG = {
     "autonomy_level": "suggest",
     "content_repo": {"name": "kb-fixture", "owner": "example", "visibility": "public"},
     "embedding": {"enabled": False, "model": "sentence-transformers/all-MiniLM-L6-v2"},
-    "models": {"strong": "claude-opus-5", "cheap": "claude-haiku-4-5-20251001"},
+    "models": {"strong": "claude-opus-5", "cheap": "claude-sonnet-5"},
     "connector_cadence": "weekly",
     "skill_smith_cadence": "monthly",
     "trial_questions": 3,

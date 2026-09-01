@@ -162,6 +162,9 @@ export PYTHON="$PY"
 # mechanics against THIS dev checkout, which must never be fetched or
 # fast-forwarded mid-test; the guard says the refresh already happened.
 export ZETTEL_SKILL_REFRESHED=1
+# Same reasoning for the agent registry: start rewrites it with config.yml's
+# models, and the real ~/.claude/agents is not this test's to edit.
+export ZETTEL_AGENTS_DIR="$WORK/claude-agents"
 RBRANCH="$(ZETTEL_RUN_HOLDER=smoke-1 bash scripts/remote_cycle.sh start --repo "$RKB")" \
   || fail "remote_cycle start"
 pass "lock claimed, run branch $RBRANCH"

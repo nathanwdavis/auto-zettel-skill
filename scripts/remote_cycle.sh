@@ -231,6 +231,24 @@ print("yes" if ok else f"no\t{holder.holder}\t{holder.session}\t{holder.age_hour
     git -C "$REPO" checkout -q -b "$BRANCH"
     trap - ERR
 
+    # Make config.yml's model tiers authoritative for THIS session's subagents.
+    # The registry ci/setup-environment.sh builds holds the checked-in aliases,
+    # so without this the remote path ran cheap-tier agents on Haiku whatever
+    # config.yml said -- config only ever reached the laptop path's --agents
+    # JSON. Claude Code watches the agents directory, so a rewrite now reaches
+    # the delegations that follow. Advisory like the skill refresh above: a
+    # cycle on alias-resolved models beats no cycle, and start's stdout must
+    # stay branch-only, so this reports to stderr.
+    AGENTS_DIR="${ZETTEL_AGENTS_DIR:-$HOME/.claude/agents}"
+    if MATERIALIZED="$(PYTHONPATH="$SCRIPT_DIR" "$PYBIN" -m zettel_lib.agents \
+         --repo "$REPO" --materialize "$AGENTS_DIR" 2>&1)"; then
+      echo "$MATERIALIZED" >&2
+      log "remote_cycle: $MATERIALIZED"
+    else
+      echo "warning: could not resolve agent models from config.yml; " \
+           "subagents run their checked-in tier aliases ($MATERIALIZED)" >&2
+    fi
+
     log "remote_cycle: start (holder=$HOLDER session=$SESSION branch=$BRANCH skill-rev=$(skill_rev))"
     echo "$BRANCH"
     ;;
