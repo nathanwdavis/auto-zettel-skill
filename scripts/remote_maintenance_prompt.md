@@ -7,7 +7,9 @@ arbitrarily stale, and every fix ships through this step:
 
     {{SCRIPTS}}/remote_cycle.sh refresh-skill
 
-(Fast-forward only; it declines rather than damages, and always exits 0.)
+(Fast-forward only; it declines rather than damages, and always exits 0.
+`start` below refreshes again on its own — this explicit step is belt and
+braces, so a run is current even where an older `start` is installed.)
 Then claim the run and create a branch:
 
     {{SCRIPTS}}/remote_cycle.sh start --repo {{REPO}}
@@ -92,6 +94,15 @@ could not resolve as `in-progress` and say why in its body. Then hand off:
 This commits, pushes your branch, and opens a PR. **CI runs the gates again on
 that PR and decides whether it reaches main.** If your cycle produced nothing
 but log lines, `finish` will correctly push nothing.
+
+If `finish` says to open the PR yourself (the GitHub CLI is not installed in
+remote containers), open it with the GitHub MCP tools, then enable auto-merge
+on it (`enable_pr_auto_merge`, squash) so it merges exactly when the required
+`gates` check passes and never otherwise. If enabling auto-merge fails (the
+repo setting may be off), say so in your report and leave the PR open — do
+not merge it yourself. `finish` has already written the canonical handoff
+line to log.md; record the PR number in your report, not as another log.md
+paraphrase of that line.
 
 HARD RULES for this run:
 - **You never push to main and never merge.** Your output is a branch and a PR.

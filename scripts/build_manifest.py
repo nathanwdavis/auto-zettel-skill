@@ -168,7 +168,18 @@ def main(argv: list[str] | None = None) -> int:
             if current != expected:
                 stale.append(repo.rel(path) if path.exists() else str(path.name))
         if stale:
+            # Name the second cause, because the obvious advice makes it worse.
+            # In CI this script is the CURRENT one and the committed file came
+            # from a run's own install -- so when that install is stale, "re-run
+            # build_manifest.py" regenerates the same wrong bytes. A live run hit
+            # exactly this: it took the advice, still failed, and hand-wrote an
+            # inquiries block in a guessed schema twice before finding the cache.
             print(f"error: {', '.join(stale)} out of date; re-run build_manifest.py",
+                  file=sys.stderr)
+            print("hint: if you just ran it and this still fails, the installed "
+                  "skill is probably stale -- refresh it "
+                  "(scripts/remote_cycle.sh refresh-skill) and rebuild. "
+                  "Never hand-edit these files to match; the generator is canonical.",
                   file=sys.stderr)
             return EXIT_USAGE
         print("build_manifest: manifest.json and .bib/refs.json up to date")

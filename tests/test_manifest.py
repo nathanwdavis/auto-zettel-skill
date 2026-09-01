@@ -85,3 +85,15 @@ def test_check_flag_detects_staleness(clean_repo):
     note.meta["title"] = "A different title"
     note.save()
     assert run_script("build_manifest.py", clean_repo, "--check").returncode != 0
+
+
+def test_stale_check_points_at_a_stale_install_not_just_a_rebuild(clean_repo):
+    """A live run took the plain "re-run build_manifest.py" advice, still failed
+    (its own generator was the stale thing), and hand-wrote a guessed schema
+    twice before finding the cache. The message has to name that second cause."""
+    note = load(clean_repo, f"permanent/{PERM_KEY}.md")
+    note.meta["title"] = "A different title"
+    note.save()
+    err = run_script("build_manifest.py", clean_repo, "--check").stderr
+    assert "refresh-skill" in err, "the hint must name the actual remedy"
+    assert "hand-edit" in err, "and rule out the fix that made it worse"
