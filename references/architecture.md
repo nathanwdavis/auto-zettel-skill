@@ -4,7 +4,7 @@
 
 | | Skill repo (this one) | Content repo |
 |---|---|---|
-| Visibility | Always private | Public or private, chosen at genesis |
+| Visibility | Public (amendment A4) | Public or private, chosen at genesis |
 | Contains notes? | Never | Yes, all of them |
 | Created by | A human, once | `scripts/init_content_repo.sh` at genesis |
 | Modified by a run? | Never | Yes — this is the working repo |
@@ -55,7 +55,8 @@ log.md            append-only run log
 2. `init_content_repo.sh` scaffolds, commits, and pushes the substrate.
 3. First knowledge pass: capture sources, write reference + literature notes,
    distil a permanent note, build INDEX and a MOC.
-4. Gates: `verify_refs` → `build_manifest` → `lint_citations` → `lint_links`.
+4. Gates: `verify_refs` → `build_manifest` → `lint_citations` → `lint_links`
+   → `lint_skills`.
 5. Commit and push only if every gate passes. Append to `log.md`.
 
 ## Gate order, and why
@@ -65,7 +66,11 @@ verify_refs.py     records verification state; exits 0 even when refs fail
 build_manifest.py  regenerates the index the lints resolve links against
 lint_citations.py  HARD GATE: ungrounded claims
 lint_links.py      HARD GATE: broken links, layering, 1-1-1
+lint_skills.py     HARD GATE: malformed or uncited child skills (Phase 4)
 ```
+
+The wrapper and CI additionally run `check_skill_sandbox.py` on the cycle's
+diff (append-only ledgers, immutable raw/); see `quality-gates.md`.
 
 `verify_refs` deliberately does not fail. Separating "record what is true" from
 "decide whether that is acceptable" means a network outage degrades to

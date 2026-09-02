@@ -153,7 +153,7 @@ See `references/note-types.md` for the full rules per note type.
 
 ## The gates
 
-Run all four, in order, before every commit. **A failing gate means do not
+Run all five, in order, before every commit. **A failing gate means do not
 commit and do not push** — fix the notes instead.
 
 ```sh
@@ -161,7 +161,11 @@ scripts/verify_refs.py    --repo <repo> --mailto <you@example.org>
 scripts/build_manifest.py --repo <repo>
 scripts/lint_citations.py --repo <repo>   # hard-fails on ungrounded claims
 scripts/lint_links.py     --repo <repo>   # hard-fails on broken/foreign links
+scripts/lint_skills.py    --repo <repo>   # hard-fails on malformed child skills
 ```
+
+The maintenance wrapper and the content repo's CI also run
+`check_skill_sandbox.py` over the whole cycle's diff.
 
 `verify_refs.py` records state and exits 0 even with unverified references —
 `lint_citations.py` is the gate that fails. Use `--offline` to verify from

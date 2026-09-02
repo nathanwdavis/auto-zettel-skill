@@ -100,7 +100,7 @@ read-only, because deciding what to work is the run's job.
 
 The first is the one with teeth. Without it a run can close every question it
 touches and leave the base no larger, and the status field would report health
-it does not have. The third rule is why answers must be *permanent* notes: a
+it does not have. The second rule is why answers must be *permanent* notes: a
 literature note summarises a source, it does not assert an answer.
 
 ## Ad-hoc research
@@ -134,6 +134,13 @@ never lost, even when the answer is.
 When the research is done, answer the user in chat with the sources you
 verified, file notes only if they are worth citing again, and set the inquiry's
 `status` and `result_notes` either way.
+
+## Worktrees
+
+`scripts/new_worktree.sh --repo <repo> --name <branch>` creates an isolated
+worktree under `.worktrees/` for a subagent and prints its path; `--remove`
+tears one down. `init_content_repo.sh --max-turns N` sets the per-run turn
+cap written to `config.yml` at genesis (default 40).
 
 ## Where this sits
 

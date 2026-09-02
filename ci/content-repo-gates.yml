@@ -18,7 +18,8 @@ on:
   workflow_dispatch:
 
 env:
-  # Pin to a tag or SHA for reproducible gates; bump deliberately.
+  # `main` tracks the skill; pin to a tag or SHA when you want reproducible
+  # gates, and bump deliberately.
   ZETTEL_SKILL_REPO: nathanwdavis/auto-zettel-skill
   ZETTEL_SKILL_REF: main
 

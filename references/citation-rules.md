@@ -144,8 +144,16 @@ entry; `build_manifest.py` omits it from `.bib/refs.json`.
 | `malformed-chicago` | A required rendered string is empty |
 | `stale-chicago` | Strings disagree with a re-render of `csl_json` |
 | `uncited-claim` | Permanent note asserts something sourced, links nothing verified |
-| `contested-undersourced` | Tagged `contested` with fewer than 3 verified references |
+| `contested-undersourced` | Tagged `contested` grounded in fewer than 3 distinct verified *sources* (by DOI/ISBN/PMID/arXiv/URL, not by note) |
 | `scripture-in-bibliography` | Scripture carrying a `chicago_bib` entry |
+| `scripture-tier` | `scripture: true` without `source_tier: primary-text` (AC-9) |
+| `duplicate-source` | Two reference notes describe one source (same DOI/ISBN/PMID/arXiv id/URL); both are named |
+| `missing-field` | A reference note lacks `source_tier`, `raw_capture`, or one of the four `verification` keys; a verified note with an empty `date`, or a `raw-capture` method with an empty `raw_capture` |
+| `bad-source-tier` | `source_tier` outside `peer-reviewed | primary-text | reputable-secondary | general-web` |
+
+And one **warning** (stderr, exit 0): `weak-sourcing`, a permanent note whose
+verified references are all `general-web`. A lead found on the open web is
+how research starts; the warning is the reminder to finish grounding it.
 
 Never satisfy one of these by weakening the rule, deleting the note, or
 inventing a citation. Capture the source or drop the claim.

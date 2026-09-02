@@ -68,6 +68,7 @@ logged as a tension.
 ## Push authority (amendment A3)
 
 No agent pushes — ever. The headless run commits; `maintenance_run.sh`
-independently re-runs `build_manifest --check`, `lint_citations`, and
-`lint_links`, and pushes only when all pass. A budget- or turn-cut run leaves
+independently re-runs `build_manifest --check`, the three lints, and
+`check_skill_sandbox.py`, and pushes only when all pass (after a rejected
+push it re-pulls and re-runs everything but the sandbox check). A budget- or turn-cut run leaves
 its commits local and unpushed.

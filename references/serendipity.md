@@ -36,7 +36,9 @@ already neighbours; connecting them is bookkeeping, not serendipity.
 
 The thresholds differ because the scales do: TF-IDF cosine over short notes
 lands an order of magnitude below embedding cosine. Each backend carries its
-own calibrated default; `--threshold` overrides both.
+own calibrated default; `--threshold` overrides both. `--force-lexical` skips
+the embedding backend even when config enables it, and `--max-proposals`
+caps how many candidates are written.
 
 **Tuning.** Too much noise, raise it; nothing surfacing, lower it. The
 meaningful signal is the *ratio* between a genuine cross-domain pair and a

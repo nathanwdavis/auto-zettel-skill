@@ -12,10 +12,30 @@ of "make the gate pass".
 |---|---|---|
 | `verify_refs.py` | verification state per reference (records, exits 0; `--offline` checks raw/ captures only) | usage errors only — `lint_citations` is the gate that fails |
 | `build_manifest.py --check` | manifest.json is current and deterministic | drift between notes and index |
-| `lint_citations.py` | every sourced claim traces to a verified reference; Chicago strings current; source tiers | ungrounded claims, unverified refs |
-| `lint_links.py` | link resolvability, FR-5 taxonomy, INDEX→MOC→note layering, 1-1-1, key naming, inquiry lifecycle (AC-6) | broken/foreign links, malformed identity, answered-with-nothing |
+| `lint_citations.py` | every sourced claim traces to a verified reference; Chicago strings current; reference-note field completeness, source-tier vocabulary, one note per source | ungrounded claims, unverified or malformed refs, duplicate sources |
+| `lint_links.py` | link resolvability, FR-5 taxonomy, INDEX→MOC→note layering (both hops), 1-1-1 including the literature locator and `reference` field, key naming, inquiry lifecycle (AC-6) | broken/foreign links, malformed identity, empty MOCs, answered-with-nothing |
 | `lint_skills.py` | skill layer wellformedness: two-file units, PURPOSE provenance and status, no re-proposed rejected creates | malformed or uncited child skills (AC-34/AC-36) |
 | `check_skill_sandbox.py` | the cycle diff kept log.md and skill-impact.md append-only and raw/ immutable; `--strict` confines a smith diff to its sandbox | history rewrites, raw edits, sandbox escapes (AC-37) |
+
+### `lint_links.py` rules
+
+| Rule | Fails when |
+|---|---|
+| `missing-key`, `malformed-key`, `filename-key-mismatch`, `slug-key-mismatch`, `id-key-mismatch` | the filename stem, `key`, `slug`, and `id` disagree (A2) |
+| `bad-relation` | a typed link's relation is outside the FR-5 taxonomy |
+| `unresolved-link`, `unresolved-wikilink` | a typed link or `[[...]]` names no known note |
+| `duplicate-id` | two notes share a timestamp id (A6) |
+| `atomicity` | a permanent note has no outbound typed link |
+| `one-to-one` | a literature note links to other than exactly one reference note |
+| `reference-mismatch` | a literature note's `reference` field is empty or names a different note than its source link |
+| `missing-locator` | a literature note has no locator |
+| `layering` | INDEX links to something that is not a MOC |
+| `moc-empty` | a MOC links to nothing |
+| `missing-index` | no INDEX.md |
+| `unanswered-answer`, `result-note-type`, `unresolved-result-note`, `bad-status`, `missing-question` | the inquiry lifecycle (AC-6; see `capture.md`) |
+
+`build_manifest.py` additionally refuses a note whose `updated`/`created` is
+not an ISO-8601 date (FR-3), and a duplicate id.
 
 ## Where each binds
 

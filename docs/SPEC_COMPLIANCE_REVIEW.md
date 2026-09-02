@@ -1,5 +1,10 @@
 # Spec compliance review — 2026-09-02
 
+> **Resolution.** Every item in §1 was closed in code on the same branch
+> (see `PLAN.md`, "Post-Phase-4 round 5"); §2's choices are recorded as
+> amendment A9 in `docs/REQUIREMENTS.md`; §3's drift was corrected. The
+> findings below are kept as written, as the record of what was found.
+
 A pass over `docs/REQUIREMENTS.md` (FR/AC/NFR/QA, amendments A1–A8, §12
 checklist) and `PLAN.md` against the code at `f5b953c` (main after PR #13).
 Every claim below was checked against a file and line; probes that needed a
