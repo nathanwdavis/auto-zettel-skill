@@ -95,6 +95,21 @@ An **inquiry** is an open question tracked across runs
 `lint_links.py` refuses to let an inquiry be marked `answered` without a
 `result_notes` backlink to the permanent note that answered it.
 
+### Query — what does the base already know?
+
+```sh
+scripts/query.py --repo <content-repo> "atomic notes" [--top 15] [--json]
+```
+
+Ranks every note against the query, groups the matches by type (claims,
+literature, sources with their verification state, maps), lists open
+inquiries that touch the topic and the notes one link away, and names the
+gaps: terms the base never uses, matches with no distilled claim, notes no
+MOC reaches. It reads only — no research, no notes, no log line — and ends
+with one suggested follow-up per gap as a ready-to-run `capture.py` command.
+Add `--file-gaps` (or tell the session to) and it captures them all for the
+next run. Details: [`references/query.md`](references/query.md).
+
 ### Ad-hoc research — answering a question now
 
 ```sh
@@ -222,7 +237,7 @@ skills/zettel-bootstrap/     SKILL.md (entry point)
 references/                  architecture, note types, citation rules
 templates/                   note, config, and child-skill templates
 agents/                      the 8 subagent definitions
-scripts/                     genesis, capture, maintenance, manifest, verification, lints
+scripts/                     genesis, capture, query, maintenance, manifest, verification, lints
   zettel_lib/                shared library (see note below)
   csl/                       bundled Chicago style + provenance
 ci/                          content-repo gate workflow + cloud env setup
@@ -235,7 +250,7 @@ PLAN.md                      phase status and build order
 `scripts/zettel_lib/` is an addition to the layout the spec prescribes: the
 Python entry points share frontmatter parsing, note naming, repo access, HTTP,
 citation rendering, similarity scoring, and the git lock, and duplicating those
-across seventeen entry points would guarantee they drift.
+across eighteen entry points would guarantee they drift.
 
 ## Working on the skill itself
 
@@ -250,7 +265,7 @@ pip install -r requirements-dev.txt
 ./smoke_test.sh
 ```
 
-`smoke_test.sh` runs the full pytest suite (380 tests) plus an end-to-end
+`smoke_test.sh` runs the full pytest suite (393 tests) plus an end-to-end
 genesis scaffold. To run pytest alone, use the virtualenv's interpreter —
 `pytest` is generally not installed in the system python:
 

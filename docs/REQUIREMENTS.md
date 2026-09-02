@@ -266,6 +266,21 @@ and the code agree again:
 - **FR-35:** now mechanical — `skill_review.py propose` refuses a second
   proposal in the cycle `log.md` shows open (`second-proposal`).
 
+### A10 — Knowledge query mode (2026-09-02, FR-13, §7, §10)
+
+The spec describes growing and gating a content repo, never *reading it
+back*: a user asking "what does the base already have on X" had no entry
+point, and a session would reach for the researcher, turning a question into
+a run. `scripts/query.py` (with `references/query.md` and a SKILL.md section)
+fills that: it ranks notes against a free-text query, reports coverage by
+note type with sources and verification state, lists touching inquiries and
+one-hop neighbours, and names gaps. It is strictly read-only — no note, no
+inquiry, no `log.md` line (the §7 read-only exception A9 records) — and
+prints, never runs, one `capture.py` follow-up per gap. `--file-gaps` is the
+explicit opt-in that captures them (an operation, logged as one), so a
+person reading the report in a remote session can say "file those". Mode A
+only; Mode B degrades to manifest metadata by hand.
+
 -----
 
 ## TL;DR

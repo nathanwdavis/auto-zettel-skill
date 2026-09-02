@@ -1,6 +1,6 @@
 # Build Plan — `zettel-bootstrap` Claude Code Skill
 
-**Source of truth:** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (all FR-x / AC-x / NFR-x / QA-x / checklist references below point there). Deviations forced by implementation are recorded there as numbered amendments — **A1–A9** so far.
+**Source of truth:** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (all FR-x / AC-x / NFR-x / QA-x / checklist references below point there). Deviations forced by implementation are recorded there as numbered amendments — **A1–A10** so far.
 **Working on this repo:** [`.claude/CLAUDE.md`](.claude/CLAUDE.md) — how to run the suite, the environment's sharp edges, and the conventions.
 **This repo:** the skill repo. It contains ONLY the `zettel-bootstrap` plugin — never zettelkasten content. The content repo is created at genesis runtime by `init_content_repo.sh` and is out of scope for this repo's file tree. Both repos are public (A4); nothing here may contain a secret (NFR-4).
 **Status:** All phases complete — 1, 2, 3, 3.5, 3.6 (PR #5), 4 (PR #6) — plus two rounds of field fixes from live scheduled runs: issue #7 → PR #8 (amendment A8), and the stale-install/frozen-prompt round → PR #10. Every §12 checklist item passes. What remains is operational, not code: see **Handoff — next steps** at the end of §2.
@@ -14,20 +14,21 @@ The plugin is laid out at the repo root (only `plugin.json` lives inside `.claud
 ```
 .claude-plugin/plugin.json          # name (required), version, description, author, repository (string URL)
 .claude-plugin/marketplace.json     # makes `/plugin marketplace add` work (FR-17)
-skills/zettel-bootstrap/SKILL.md    # six portable frontmatter fields only; body <500 lines (currently 295)
+skills/zettel-bootstrap/SKILL.md    # six portable frontmatter fields only; body <500 lines (currently 337)
 agents/                             # 8 subagent definitions (.md + YAML frontmatter)
   orchestrator.md researcher.md synthesizer.md critic.md
   librarian.md connector.md note-maintainer.md skill-smith.md
 references/                         # progressive-disclosure detail docs
   architecture.md note-types.md citation-rules.md orchestra.md
   two-mode-access.md scheduling.md serendipity.md remote-execution.md
-  capture.md skill-emergence.md quality-gates.md
+  capture.md skill-emergence.md quality-gates.md query.md
 templates/                          # content-repo scaffolding sources
   fleeting.md literature.md permanent.md reference.md moc.md inquiry.md
   inbox-entry.md config.yml PURPOSE.md child-SKILL.md
 scripts/
   init_content_repo.sh              # genesis (FR-18); --no-remote for local
   capture.py inquiries.py           # human/agent input + the FR-6 inquiry reporter
+  query.py                          # read-only: what the base already knows about X (A10)
   adhoc_research.sh                 # "answer this now", through the scheduled path
   maintenance_run.sh                # laptop path: wraps a nested `claude -p`
   remote_cycle.sh                   # remote path: start|finish|abort|status|refresh-skill
@@ -299,9 +300,31 @@ a missing key before touching the lock branch; the `race` stub mode that
 proves the retry re-runs `lint_skills`; a second `propose` in one cycle is
 refused (also smoke 8e).
 
+### Post-Phase-4 round 6 — the knowledge query mode  ✅ shipped
+*Amendment A10. Exit gate: a session asked "what do we have on X" answers from the repo without a run.*
+
+Every entry point either grew the base or gated it, so "what do we already
+know about X" had no home and a session would reach for the researcher.
+`scripts/query.py` maps existing coverage and nothing else: TF-IDF ranking
+via the sweep's shared vectoriser (`similarity.tfidf_vectors`, now also
+behind `score_query`), matches grouped by note type with each claim's
+sources and each source's verification state, the inquiries that touch the
+topic, one-hop connected notes, and named gaps (terms the base never uses,
+undistilled material, notes no MOC reaches). Each gap carries one suggested
+follow-up as a shell-quoted `capture.py` command — an inquiry for a missing
+topic, INBOX entries for undistilled or unmapped material — printed, never
+run; `--file-gaps` is the explicit opt-in that captures them all, because
+most queries are asked of a session and the person answers "file those" in
+chat. Mode A only; the Mode-B metadata fallback is prose in SKILL.md and
+`references/query.md`.
+
+**Tests to keep**: the tree is byte-identical after a query (no log line,
+A9); unknown terms surface as a gap with the suggested command; connected
+notes stay within one hop; the MOC gap names the unreachable keys.
+
 ### Handoff — next steps (operational, not code)
 
-The plugin code is done and green (380 tests, smoke exit 0, strict validate).
+The plugin code is done and green (393 tests, smoke exit 0, strict validate).
 What remains happens in the *environment* and the *content repo*, not here.
 
 **Done** (2026-09-01): the content repo's GitHub settings are now set —
@@ -358,7 +381,7 @@ agent holds the lock and is already mid-merge.
 
 ## 3. Testing & definition of done
 
-The §12 checklist is the definition of done, run before final commit of each phase and in full before v1. `smoke_test.sh` orchestrates every item that works without network or `gh`; the pytest suite currently stands at **380 tests**.
+The §12 checklist is the definition of done, run before final commit of each phase and in full before v1. `smoke_test.sh` orchestrates every item that works without network or `gh`; the pytest suite currently stands at **393 tests**.
 
 Fixtures are **built programmatically** in `tests/conftest.py`, not checked in as static files, so every violation fixture is provably "the clean repo with exactly one thing broken" and the reference note's Chicago strings stay self-consistent with its CSL-JSON.
 
