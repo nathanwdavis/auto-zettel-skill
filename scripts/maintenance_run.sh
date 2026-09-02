@@ -239,8 +239,10 @@ for attempt in 1 2 3; do
     exit 0
   fi
   log "maintenance_run: push rejected (attempt $attempt); re-pulling and re-linting"
-  git -C "$REPO" pull --no-rebase origin "$BRANCH" >> "$RUN_LOG" 2>&1 \
-    || { log "maintenance_run: ABORT re-pull failed"; die "push retry: pull failed"; }
+  # The merge commit needs an identity; a cron host may have none configured.
+  git -C "$REPO" -c user.name="zettel-bootstrap" -c user.email="noreply@localhost" \
+      pull --no-rebase --no-edit origin "$BRANCH" >> "$RUN_LOG" 2>&1 \
+    || { log "maintenance_run: ABORT re-pull failed"; die "push retry: pull failed (see $RUN_LOG)"; }
   run_gates "${MERGE_GATES[@]}" \
     || { log "maintenance_run: ABORT re-lint failed after merge"; die "push retry: a gate failed after merge (see $RUN_LOG)"; }
 done

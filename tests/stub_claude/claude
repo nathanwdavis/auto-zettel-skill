@@ -193,6 +193,7 @@ if [[ "$MODE" == "race" ]]; then
   # not indexed); two appends to log.md would conflict instead of merging.
   ORIGIN="$(git -C "$REPO" remote get-url origin)"
   OTHER="$(mktemp -d)"
+  trap 'rm -rf "$OTHER"' EXIT
   git clone -q "$ORIGIN" "$OTHER/clone"
   printf '\n- new: a question filed while the run was busy\n' >> "$OTHER/clone/INBOX.md"
   git -C "$OTHER/clone" -c user.name=other -c user.email=other@localhost \

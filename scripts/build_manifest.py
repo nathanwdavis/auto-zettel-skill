@@ -48,18 +48,26 @@ def stamp(note: Note, rel: str) -> str:
     sweep sort by; a free-text date sorts nowhere. Accepts a date or a
     datetime (YAML already turns an unquoted 2026-08-30 into a date object).
     """
+    chosen = ""
     for field in ("updated", "created"):
         value = note.meta.get(field)
         if value in (None, ""):
             continue
-        if not isinstance(value, (_dt.date, _dt.datetime)):
+        if isinstance(value, (_dt.date, _dt.datetime)):
+            # An unquoted YAML date parses to an object; str() of a datetime
+            # uses a space separator, so normalise to the same ISO form a
+            # quoted string would have carried.
+            text = value.isoformat()
+        else:
             text = str(value).strip()
             try:
                 _dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
             except ValueError:
                 raise FrontmatterError(
                     f"{rel}: '{field}' is {text!r}, not an ISO-8601 date (FR-3)") from None
-    return str(note.meta.get("updated") or note.meta.get("created") or "")
+        if not chosen:
+            chosen = text
+    return chosen
 
 
 def build(repo: ContentRepo) -> dict:
