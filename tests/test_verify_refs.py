@@ -251,6 +251,34 @@ def test_network_failure_degrades_to_raw_capture_only(clean_repo):
     assert note.meta["verification"]["method"] == "raw-capture"
 
 
+def test_dead_network_on_an_arxiv_reference_degrades_rather_than_flagging_rot(clean_repo):
+    """The arXiv fetch used to swallow NetworkUnavailable, so a capture plus an
+    arXiv id on a dead network came back as identifier_check: failed."""
+    def dead(url, headers):
+        raise http.NetworkUnavailable("connection refused")
+
+    set_csl(clean_repo, drop=["ISBN"], URL="https://arxiv.org/abs/2608.27454")
+    note = load(clean_repo, f"reference/{REF_KEY}.md")
+    note.meta["raw_capture"] = "raw/202608301000-ahrens-smart-notes.txt"
+    note.save()
+    verified, total = verify_refs.run(
+        repo_of(clean_repo), offline=False, mailto="me@example.org",
+        transport=dead, render=False)
+    assert (verified, total) == (1, 1)
+    note = load(clean_repo, f"reference/{REF_KEY}.md")
+    assert note.meta["verification"]["method"] == "raw-capture"
+    assert "identifier_check" not in note.meta["verification"]
+
+
+def test_one_malformed_reference_does_not_stop_the_others(clean_repo):
+    (clean_repo / "reference" / "aaa-broken--202608300900.md").write_text(
+        "no frontmatter\n", encoding="utf-8")
+    result = run_script("verify_refs.py", clean_repo, "--offline")
+    assert result.returncode == 0
+    assert "SKIPPED" in result.stdout
+    assert f"reference/{REF_KEY}.md\tverified via raw-capture" in result.stdout
+
+
 # --- rendering ----------------------------------------------------------------
 
 def test_verify_refresh_rewrites_chicago_strings_from_csl(clean_repo):

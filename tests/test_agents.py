@@ -45,11 +45,13 @@ def test_agents_that_reach_the_web_use_pascalcase_tool_names(path):
         "tool names are PascalCase in Claude Code (WebSearch/WebFetch)"
 
 
-def test_research_facing_agents_carry_web_tools():
-    """FR-16's intent: agents that gather or check sources can reach the web."""
-    for name in ("orchestrator", "researcher", "synthesizer", "librarian"):
-        meta = agents_mod.parse_agent(AGENTS_DIR / f"{name}.md")
-        assert {"WebSearch", "WebFetch"} <= set(meta["tools"]), name
+@pytest.mark.parametrize("path", sorted(AGENTS_DIR.glob("*.md")), ids=lambda p: p.stem)
+def test_every_agent_can_reach_the_web(path):
+    """FR-16: all agents get web_search + web_fetch. The connector and smith
+    carry rails in their bodies about what the web is NOT for; the tools
+    themselves are unconditional."""
+    meta = agents_mod.parse_agent(path)
+    assert {"WebSearch", "WebFetch"} <= set(meta["tools"]), path.stem
 
 
 def test_tier_defaults_match_fr29():

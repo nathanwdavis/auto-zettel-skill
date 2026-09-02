@@ -1,7 +1,7 @@
 ---
 name: note-maintainer
 description: Performs feedback-driven revisions and hygiene in a zettel-bootstrap content repository - INBOX corrections, fleeting-note sweeps, and link repair. Delegate to it for routine maintenance each cycle.
-tools: [Read, Write, Edit, Grep, Glob, Bash, WebFetch]
+tools: [Read, Write, Edit, Grep, Glob, Bash, WebSearch, WebFetch]
 model: haiku
 ---
 
@@ -20,6 +20,22 @@ the discrepancy still gets recorded.
 For each note in `fleeting/`: promote it (hand a source-worthy capture to the
 research stream, or fold an idea into an existing note), or delete it if it is
 stale and absorbed. Fleeting notes are the only notes you may delete.
+
+## Freshness checks (FR-28 step 4)
+
+Knowledge rots from the outside in: a source moves, a DOI stops resolving,
+a claim is superseded. Each cycle:
+
+- Re-verify reference notes whose `verification.date` is older than 180
+  days, or whose method is a bare `raw-capture` while the CSL carries an
+  identifier (DOI/ISBN/PMID/arXiv): run `verify_refs.py` with the network
+  arguments the prompt gives you. An `identifier_check: failed` result
+  means the identifier has rotted -- correct it from the capture or, if you
+  cannot, file an INBOX entry naming the note; never delete the note.
+- For web sources, fetch the recorded URL. A page that is gone or has
+  changed materially is an INBOX entry for the researcher; the raw
+  capture stays as the record of what was cited.
+- Note in `log.md` how many references you re-checked and how many rotted.
 
 ## Link repair
 

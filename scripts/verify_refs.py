@@ -135,10 +135,11 @@ def verify_note(
 
 
 def _raw(url: str, transport) -> str | None:
-    try:
-        resp = transport(url, {"User-Agent": "zettel-bootstrap/0.1"})
-    except http.NetworkUnavailable:
-        return None
+    """Fetch a non-JSON registry page. NetworkUnavailable propagates, like the
+    JSON lookups: swallowing it here made a dead network on an arXiv-only
+    reference read as a definitive miss (and, with a capture present, as a
+    rotted identifier) instead of degrading to capture-only (NFR-5)."""
+    resp = transport(url, {"User-Agent": "zettel-bootstrap/0.1"})
     return resp.body if resp.status == 200 else None
 
 
@@ -166,8 +167,17 @@ def run(repo: ContentRepo, *, offline: bool, mailto: str, transport=http.request
     verified = total = 0
     degraded = False
 
-    for note in repo.notes(types=["reference"]):
+    for path in repo.note_paths(types=["reference"]):
         total += 1
+        try:
+            note = Note.load(path)
+        except FrontmatterError as exc:
+            # One unparseable note used to stop the whole run (exit 0, with
+            # every later note silently unprocessed). Report it and go on;
+            # lint_citations fails the note itself.
+            print(f"warning: {exc}; skipping", file=sys.stderr)
+            print(f"{repo.rel(path)}\tSKIPPED (malformed frontmatter)")
+            continue
         try:
             ok, method, source, id_check = verify_note(
                 note, repo, offline=offline, mailto=mailto, transport=transport)
