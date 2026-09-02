@@ -220,7 +220,7 @@ pass "AC-6 rejects an answered inquiry with no result_notes"
 
 # A10: the query mode maps what exists and writes nothing -- not even a log line.
 LOG_BEFORE="$(sha256sum "$KB/log.md")"
-"$PY" scripts/query.py --repo "$KB" "captured thought" | grep -q "wrote nothing" \
+"$PY" scripts/query.py --repo "$KB" "captured thought" | grep -q "nothing has been filed" \
   || fail "query.py report"
 "$PY" scripts/query.py --repo "$KB" "captured thought" --json | grep -q '"matched"' \
   || fail "query.py --json"
