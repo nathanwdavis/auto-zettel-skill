@@ -8,7 +8,7 @@ Growing the base is a cycle's job, behind the lock and the gates; mapping it
 is not.
 
 ```sh
-scripts/query.py --repo <repo> "<query>" [--top N] [--json]
+scripts/query.py --repo <repo> "<query>" [--top N] [--json] [--file-gaps]
 ```
 
 ## How a note is ranked
@@ -58,10 +58,27 @@ next step:
 - **Matched notes that no MOC reaches.** They exist but a reader walking
   down from `INDEX.md` cannot find them — a librarian's job.
 
-The report ends with the exact `capture.py inquiry` command for the query.
-It is printed, not run: whether a gap is worth a cycle's budget is the
+Each gap comes with one suggested follow-up, shown as a ready-to-run
+`capture.py` command (shell-quoted, so a query with quotes pastes safely):
+
+| Gap | Suggestion | Why that kind |
+|---|---|---|
+| terms the base never uses, or nothing matched | an **inquiry** for the query | a question a run researches |
+| matches but no permanent note | an **INBOX** entry naming the material to distil | an instruction to the synthesizer; the sources are already on file |
+| matched notes no MOC reaches | an **INBOX** entry naming the keys to map | an instruction to the librarian |
+
+They are printed, not run: whether a gap is worth a cycle's budget is the
 user's decision, and a query that filed inquiries as a side effect would be
 an operation wearing a question's clothes (A9's read-only rule).
+
+`--file-gaps` is the explicit opt-in. It exists because most queries are
+asked of a session, not typed at a terminal: the person reads the report in
+chat and says "file those". The session re-runs the query with the flag,
+which captures every suggestion through `capture.py`'s own functions (so
+ids are allocated and the frontmatter is gate-clean), rebuilds the manifest,
+and logs each capture. With the flag the tool *is* an operation and behaves
+like one. Committing the captures is still the session's job: from a remote
+session that means a branch and a PR, exactly as any other capture.
 
 ## Mode B (no local clone)
 
@@ -80,6 +97,7 @@ one, degrade honestly:
 
 - Exit 0 whenever the repo opens, including a query that matches nothing;
   usage errors exit 2.
-- Nothing is written: no note, no inquiry, no `log.md` line (a query is not
-  an operation).
+- Nothing is written without `--file-gaps`: no note, no inquiry, no
+  `log.md` line (a query is not an operation). With it, exactly the listed
+  suggestions are captured, and each is logged.
 - Deterministic: the same repo and query produce the same report.

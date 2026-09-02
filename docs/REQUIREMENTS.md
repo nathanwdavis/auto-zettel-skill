@@ -276,8 +276,10 @@ fills that: it ranks notes against a free-text query, reports coverage by
 note type with sources and verification state, lists touching inquiries and
 one-hop neighbours, and names gaps. It is strictly read-only — no note, no
 inquiry, no `log.md` line (the §7 read-only exception A9 records) — and
-prints, never runs, the `capture.py inquiry` command for a gap. Mode A only;
-Mode B degrades to manifest metadata by hand.
+prints, never runs, one `capture.py` follow-up per gap. `--file-gaps` is the
+explicit opt-in that captures them (an operation, logged as one), so a
+person reading the report in a remote session can say "file those". Mode A
+only; Mode B degrades to manifest metadata by hand.
 
 -----
 

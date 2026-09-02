@@ -15,20 +15,27 @@ TF-IDF the serendipity sweep uses (``zettel_lib.similarity``), applied query
 vs. note instead of note vs. note; titles and tags are weighted above bodies
 because a permanent note's title is its claim.
 
-    query.py --repo <path> "<query>" [--top N] [--json]
+    query.py --repo <path> "<query>" [--top N] [--json] [--file-gaps]
 
-A query is not an operation, so nothing is appended to log.md (A9).
+A query is not an operation, so nothing is appended to log.md (A9). The one
+exception is explicit: ``--file-gaps`` turns the report's suggested
+follow-ups (an inquiry for a topic the base lacks, INBOX entries for
+undistilled or unmapped material) into real captures through capture.py, so
+a person reading the report in a remote session can say "file those" and
+have it done. That IS an operation, and it logs like one.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import shlex
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import capture
 from zettel_lib import similarity
 from zettel_lib.cli import EXIT_OK, EXIT_USAGE, base_parser, open_repo
 from zettel_lib.frontmatter import FrontmatterError, Note
@@ -133,21 +140,45 @@ def query(repo: ContentRepo, text: str, top: int = 15) -> dict:
                               "result_notes": inq.result_notes})
 
     by_type = {t: sum(1 for m in matched if m["type"] == t) for t in TYPE_ORDER}
-    gaps = []
+
+    # Each gap maps to one concrete follow-up the next run could act on. They
+    # are suggestions: printed as ready-to-run capture commands, and executed
+    # only under --file-gaps. Research gaps become inquiries (questions a run
+    # works); distillation and mapping gaps become INBOX entries (instructions
+    # to the synthesizer and librarian) -- filing them as inquiries would ask
+    # the researcher to fetch sources the base already holds.
+    gaps, suggestions = [], []
+    repo_arg = shlex.quote(str(repo.root))
+
+    def suggest(kind: str, title: str, why: str, priority: str = "normal") -> None:
+        cmd = f"scripts/capture.py --repo {repo_arg} {kind} {shlex.quote(title)}"
+        if kind == "inquiry":
+            cmd += f" --priority {priority}"
+        suggestions.append({"kind": kind, "title": title, "priority": priority,
+                            "why": why, "command": cmd})
+
     if missing:
         gaps.append("no note uses the term(s) " + ", ".join(f"'{t}'" for t in missing)
                     + "; the base has nothing on them")
+    if not matched:
+        gaps.append("no note matches this query at all")
+    if missing or not matched:
+        suggest("inquiry", text, "research the topic the base lacks")
     if matched and by_type["permanent"] == 0:
         gaps.append("sources or summaries match but no permanent note does: "
                     "nothing has been distilled into a claim yet")
+        material = [m["key"] for m in matched if m["type"] != "moc"]
+        suggest("inbox", f"Distil a permanent note on {text} from: " + ", ".join(material),
+                "the synthesizer's job, not the researcher's")
     uncovered = [m["key"] for m in matched if m["type"] != "moc"
                  and not any(by_key[k].type == "moc" for k in inbound[m["key"]])]
     if uncovered:
         gaps.append(f"{len(uncovered)} matched note(s) sit in no map of content, so a "
                     "reader walking down from INDEX cannot find them: "
                     + ", ".join(f"`{k}`" for k in uncovered))
-    if not matched:
-        gaps.append("no note matches this query at all")
+        suggest("inbox", "Add to a map of content: " + ", ".join(uncovered)
+                + f" (surfaced by a query for: {text})",
+                "the librarian's job")
     cfg = {}
     try:
         cfg = repo.config()
@@ -167,8 +198,33 @@ def query(repo: ContentRepo, text: str, top: int = 15) -> dict:
         "inquiries": inquiries,
         "topics": touched_topics,
         "gaps": gaps,
+        "suggestions": suggestions,
+        "filed": [],
         "warnings": warnings,
     }
+
+
+def file_gaps(repo: ContentRepo, report: dict) -> list[dict]:
+    """Turn the report's suggestions into captures (the --file-gaps path).
+
+    Goes through capture.py's own functions so the artifacts are exactly what
+    a hand capture would produce -- allocated ids, gate-clean frontmatter --
+    and rebuilds the manifest once at the end, the way capture.py does after
+    an inquiry, so a capture-only commit still passes the currency gate.
+    """
+    filed = []
+    for s in report["suggestions"]:
+        if s["kind"] == "inquiry":
+            path = capture.capture_inquiry(repo, s["title"], "", s["priority"])
+        else:
+            path = capture.capture_inbox(repo, s["title"], "")
+        rel = repo.rel(path)
+        repo.append_log(f"query --file-gaps: {s['kind']} -> {rel}")
+        filed.append({"kind": s["kind"], "path": rel})
+    if any(f["kind"] == "inquiry" for f in filed):
+        capture.build_manifest.regenerate(repo)
+    report["filed"] = filed
+    return filed
 
 
 def render(report: dict, repo_path: str) -> str:
@@ -229,10 +285,24 @@ def render(report: dict, repo_path: str) -> str:
     if not report["gaps"]:
         out.append("- none obvious: claims, sources, and a map all exist")
     out.append("")
-    out.append("This report wrote nothing. If a gap is worth closing, file it for the "
-               "next run:")
-    out.append(f"  scripts/capture.py --repo {repo_path} inquiry "
-               f"\"{report['query']}\" --priority normal")
+    if report["filed"]:
+        out.append("## Filed for the next run")
+        for f in report["filed"]:
+            out.append(f"- {f['kind']}: `{f['path']}`")
+        out.append("")
+        out.append("Commit these so the next scheduled run sees them (from a remote "
+                   "session: on a branch, via a PR).")
+    elif report["suggestions"]:
+        out.append("## Suggested follow-ups (nothing has been filed)")
+        for s in report["suggestions"]:
+            out.append(f"- {s['kind']}: {s['title']}")
+            out.append(f"  why: {s['why']}")
+            out.append(f"  {s['command']}")
+        out.append("")
+        out.append(f"To file all {len(report['suggestions'])} at once, re-run this query "
+                   "with --file-gaps (or ask the session to).")
+    else:
+        out.append("This report wrote nothing, and found nothing worth filing.")
     for w in report["warnings"]:
         out.append(f"warning: {w}")
     return "\n".join(out)
@@ -244,6 +314,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--top", type=int, default=15,
                         help="maximum matched notes to report (default 15)")
     parser.add_argument("--json", action="store_true", help="emit the report as JSON")
+    parser.add_argument("--file-gaps", action="store_true",
+                        help="capture the suggested follow-ups (inquiries / INBOX entries) "
+                             "through capture.py instead of only printing them")
     args = parser.parse_args(argv)
     if not args.query.strip():
         print("error: empty query", file=sys.stderr)
@@ -251,7 +324,9 @@ def main(argv: list[str] | None = None) -> int:
     repo = open_repo(args.repo)
     try:
         report = query(repo, args.query, top=max(1, args.top))
-    except ContentRepoError as exc:
+        if args.file_gaps:
+            file_gaps(repo, report)
+    except (ContentRepoError, FrontmatterError, OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_USAGE
     if args.json:

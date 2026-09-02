@@ -69,6 +69,41 @@ def test_unknown_terms_are_reported_as_a_gap(clean_repo):
     assert "capture.py" in out and "inquiry" in out, "the next step is suggested, not taken"
 
 
+def test_suggested_commands_are_shell_safe(clean_repo):
+    """A query with quotes must not produce a command that misparses when pasted."""
+    import shlex
+    q = "the \"odd\" query's terms"
+    data = json.loads(report(clean_repo, q, "--json").stdout)
+    assert data["suggestions"], data["gaps"]
+    argv = shlex.split(data["suggestions"][0]["command"])
+    assert q in argv
+    assert str(clean_repo) in argv
+
+
+def test_file_gaps_captures_the_suggestions_and_logs(clean_repo):
+    """The one write path, and only on request: suggestions become real
+    captures through capture.py, the manifest is rebuilt, and log.md records it."""
+    before = set(p.name for p in (clean_repo / "inquiries").glob("*.md"))
+    out = report(clean_repo, "quantum chromodynamics", "--file-gaps").stdout
+    assert "Filed for the next run" in out
+    new = set(p.name for p in (clean_repo / "inquiries").glob("*.md")) - before
+    assert len(new) == 1
+    manifest = json.loads((clean_repo / "manifest.json").read_text(encoding="utf-8"))
+    assert any(i["question"] == "quantum chromodynamics" for i in manifest["inquiries"])
+    log = (clean_repo / "log.md").read_text(encoding="utf-8")
+    assert "query --file-gaps: inquiry -> inquiries/" in log
+    assert run_script("lint_links.py", clean_repo).returncode == 0
+
+
+def test_file_gaps_turns_mapping_gaps_into_inbox_entries(two_cluster_repo):
+    data = json.loads(report(two_cluster_repo, "reinvested returns", "--json",
+                             "--top", "1", "--file-gaps").stdout)
+    kinds = [f["kind"] for f in data["filed"]]
+    assert kinds == ["inbox"]
+    inbox = (two_cluster_repo / "INBOX.md").read_text(encoding="utf-8")
+    assert "Add to a map of content: reinvested-returns-compound--202701010011" in inbox
+
+
 def test_open_inquiries_touching_the_query_are_listed(clean_repo):
     run_script("capture.py", clean_repo, "inquiry", "Do atomic notes really compound?",
                "--priority", "high")

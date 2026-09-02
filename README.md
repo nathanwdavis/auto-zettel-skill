@@ -106,8 +106,9 @@ literature, sources with their verification state, maps), lists open
 inquiries that touch the topic and the notes one link away, and names the
 gaps: terms the base never uses, matches with no distilled claim, notes no
 MOC reaches. It reads only — no research, no notes, no log line — and ends
-with the `capture.py inquiry` command to file a gap if you decide it is
-worth a run. Details: [`references/query.md`](references/query.md).
+with one suggested follow-up per gap as a ready-to-run `capture.py` command.
+Add `--file-gaps` (or tell the session to) and it captures them all for the
+next run. Details: [`references/query.md`](references/query.md).
 
 ### Ad-hoc research — answering a question now
 
@@ -264,7 +265,7 @@ pip install -r requirements-dev.txt
 ./smoke_test.sh
 ```
 
-`smoke_test.sh` runs the full pytest suite (390 tests) plus an end-to-end
+`smoke_test.sh` runs the full pytest suite (393 tests) plus an end-to-end
 genesis scaffold. To run pytest alone, use the virtualenv's interpreter —
 `pytest` is generally not installed in the system python:
 

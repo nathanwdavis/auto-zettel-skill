@@ -100,9 +100,22 @@ base never uses, matches with no distilled claim, notes no MOC reaches.
 Answer in chat from that report, citing note keys so the user can open them.
 Read the top notes if the report alone cannot settle the question. **Do not
 research, fetch sources, or write notes** — that turns a query into a run,
-and runs go through the lock and the gates. If a gap is worth closing, offer
-the `capture.py inquiry` command the report prints; filing it is the user's
-call. The script writes nothing, not even a log line.
+and runs go through the lock and the gates. The script writes nothing, not
+even a log line.
+
+**End the answer with the gaps and an offer.** The report proposes one
+follow-up per gap (an inquiry for a topic the base lacks; INBOX entries for
+material never distilled or never mapped). List them and say that on the
+user's word you will file them. Never file unasked. When told to:
+
+```sh
+scripts/query.py --repo <repo> "<X>" --file-gaps
+```
+
+That captures every suggestion through `capture.py` and rebuilds the manifest.
+Then commit the captures; from a remote session, push them on a branch and open
+a PR with auto-merge, as in [Answering a question now](#answering-a-question-now),
+so the next scheduled run picks them up.
 
 Without a local clone (Mode B): fetch `manifest.json`, match the query
 against `title`/`tags` there, then fetch the best few notes with

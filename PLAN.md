@@ -14,7 +14,7 @@ The plugin is laid out at the repo root (only `plugin.json` lives inside `.claud
 ```
 .claude-plugin/plugin.json          # name (required), version, description, author, repository (string URL)
 .claude-plugin/marketplace.json     # makes `/plugin marketplace add` work (FR-17)
-skills/zettel-bootstrap/SKILL.md    # six portable frontmatter fields only; body <500 lines (currently 324)
+skills/zettel-bootstrap/SKILL.md    # six portable frontmatter fields only; body <500 lines (currently 337)
 agents/                             # 8 subagent definitions (.md + YAML frontmatter)
   orchestrator.md researcher.md synthesizer.md critic.md
   librarian.md connector.md note-maintainer.md skill-smith.md
@@ -310,9 +310,13 @@ via the sweep's shared vectoriser (`similarity.tfidf_vectors`, now also
 behind `score_query`), matches grouped by note type with each claim's
 sources and each source's verification state, the inquiries that touch the
 topic, one-hop connected notes, and named gaps (terms the base never uses,
-undistilled material, notes no MOC reaches). It prints the `capture.py
-inquiry` command for a gap and never runs it. Mode A only; the Mode-B
-metadata fallback is prose in SKILL.md and `references/query.md`.
+undistilled material, notes no MOC reaches). Each gap carries one suggested
+follow-up as a shell-quoted `capture.py` command — an inquiry for a missing
+topic, INBOX entries for undistilled or unmapped material — printed, never
+run; `--file-gaps` is the explicit opt-in that captures them all, because
+most queries are asked of a session and the person answers "file those" in
+chat. Mode A only; the Mode-B metadata fallback is prose in SKILL.md and
+`references/query.md`.
 
 **Tests to keep**: the tree is byte-identical after a query (no log line,
 A9); unknown terms surface as a gap with the suggested command; connected
@@ -320,7 +324,7 @@ notes stay within one hop; the MOC gap names the unreachable keys.
 
 ### Handoff — next steps (operational, not code)
 
-The plugin code is done and green (390 tests, smoke exit 0, strict validate).
+The plugin code is done and green (393 tests, smoke exit 0, strict validate).
 What remains happens in the *environment* and the *content repo*, not here.
 
 **Done** (2026-09-01): the content repo's GitHub settings are now set —
@@ -377,7 +381,7 @@ agent holds the lock and is already mid-merge.
 
 ## 3. Testing & definition of done
 
-The §12 checklist is the definition of done, run before final commit of each phase and in full before v1. `smoke_test.sh` orchestrates every item that works without network or `gh`; the pytest suite currently stands at **390 tests**.
+The §12 checklist is the definition of done, run before final commit of each phase and in full before v1. `smoke_test.sh` orchestrates every item that works without network or `gh`; the pytest suite currently stands at **393 tests**.
 
 Fixtures are **built programmatically** in `tests/conftest.py`, not checked in as static files, so every violation fixture is provably "the clean repo with exactly one thing broken" and the reference note's Chicago strings stay self-consistent with its CSL-JSON.
 
