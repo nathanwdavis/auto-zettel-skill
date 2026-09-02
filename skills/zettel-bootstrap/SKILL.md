@@ -25,6 +25,7 @@ Two repositories, never mixed:
 | Situation | Go to |
 |---|---|
 | No content repo exists yet | [Genesis](#genesis) |
+| User asks what the base *already* knows about X (no research) | [Mapping existing knowledge](#mapping-existing-knowledge) |
 | User asks a question and wants it researched now | [Answering a question now](#answering-a-question-now) |
 | Content repo exists, user wants growth | [Adding knowledge](#adding-knowledge) |
 | User wants to jot a thought or file a question for later | [Capturing input](#capturing-input) |
@@ -80,6 +81,33 @@ An **inquiry** is an open question, tracked across runs (`new` → `in-progress`
 `answered` requires at least one `result_notes` entry pointing at a permanent
 note — the lint enforces it. Closing a question with nothing to point at is how
 a knowledge base quietly stops answering anything.
+
+## Mapping existing knowledge
+
+"What do we have on X?" is a different request from "find out about X".
+Answer it from the repo and only the repo:
+
+```sh
+scripts/query.py --repo <repo> "<X>" [--top 15] [--json]
+```
+
+It ranks every note against the query (titles and tags weigh most), groups
+the matches by type — claims (permanent), literature, sources on file with
+their verification state, maps of content — lists the open inquiries that
+touch the topic, adds the notes one link away, and names the gaps: terms the
+base never uses, matches with no distilled claim, notes no MOC reaches.
+
+Answer in chat from that report, citing note keys so the user can open them.
+Read the top notes if the report alone cannot settle the question. **Do not
+research, fetch sources, or write notes** — that turns a query into a run,
+and runs go through the lock and the gates. If a gap is worth closing, offer
+the `capture.py inquiry` command the report prints; filing it is the user's
+call. The script writes nothing, not even a log line.
+
+Without a local clone (Mode B): fetch `manifest.json`, match the query
+against `title`/`tags` there, then fetch the best few notes with
+`scripts/fetch_remote.py --keys` and answer from those. Say that the ranking
+was metadata-only. Details: `references/query.md`.
 
 ## Answering a question now
 
@@ -281,6 +309,7 @@ Read these only when the task calls for them:
 | `references/serendipity.md` | the sweep: candidate selection, backends, thresholds |
 | `references/remote-execution.md` | scheduled remote sessions, git lock, CI gating |
 | `references/capture.md` | the three input routes, inquiry lifecycle, ad-hoc research |
+| `references/query.md` | the read-only knowledge map: ranking, report anatomy, Mode B |
 | `references/skill-emergence.md` | child skills: the three layers, proposer rails, trial, promotion |
 | `references/quality-gates.md` | every gate and threshold, where each binds, the never-weaken rule |
 

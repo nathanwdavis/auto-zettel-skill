@@ -36,7 +36,7 @@ trap 'rm -rf "$WORK"' EXIT
 # --- 2. scripts respond to --help --------------------------------------------
 step "[2] script CLI contract"
 for s in build_manifest.py lint_citations.py lint_links.py verify_refs.py fetch_remote.py \
-         serendipity_sweep.py capture.py inquiries.py lint_skills.py \
+         serendipity_sweep.py capture.py inquiries.py query.py lint_skills.py \
          check_skill_sandbox.py skill_review.py skill_trial.py; do
   "$PY" "scripts/$s" --help >/dev/null 2>&1 || fail "scripts/$s --help"
   pass "scripts/$s --help"
@@ -217,6 +217,15 @@ sed -i.bak 's/^status: new/status: answered/' "$INQ" && rm -f "$INQ.bak"
   && fail "answered inquiry with empty result_notes should fail the lint (AC-6)"
 sed -i.bak 's/^status: answered/status: new/' "$INQ" && rm -f "$INQ.bak"
 pass "AC-6 rejects an answered inquiry with no result_notes"
+
+# A10: the query mode maps what exists and writes nothing -- not even a log line.
+LOG_BEFORE="$(sha256sum "$KB/log.md")"
+"$PY" scripts/query.py --repo "$KB" "captured thought" | grep -q "wrote nothing" \
+  || fail "query.py report"
+"$PY" scripts/query.py --repo "$KB" "captured thought" --json | grep -q '"matched"' \
+  || fail "query.py --json"
+[[ "$(sha256sum "$KB/log.md")" == "$LOG_BEFORE" ]] || fail "query.py wrote to log.md"
+pass "query.py mapped existing coverage without writing anything (A10)"
 
 # Ad-hoc research shares the lock with scheduled runs and never reaches main.
 AKB="$WORK/kb-adhoc"

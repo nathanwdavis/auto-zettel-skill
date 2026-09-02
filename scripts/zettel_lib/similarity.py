@@ -119,25 +119,7 @@ class LexicalScorer:
         keys = sorted(docs)
         if len(keys) < 2:
             return []
-
-        tokens = {k: tokenize(docs[k]) for k in keys}
-        counts = {k: Counter(tokens[k]) for k in keys}
-        n_docs = len(keys)
-
-        doc_freq: Counter[str] = Counter()
-        for k in keys:
-            doc_freq.update(set(tokens[k]))
-
-        # Smoothed idf; terms in every document contribute ~0.
-        idf = {term: math.log((n_docs + 1) / (df + 1)) + 1e-9
-               for term, df in doc_freq.items()}
-
-        vectors: dict[str, dict[str, float]] = {}
-        for k in keys:
-            total = sum(counts[k].values()) or 1
-            vec = {t: (c / total) * idf[t] for t, c in counts[k].items()}
-            norm = math.sqrt(sum(v * v for v in vec.values())) or 1.0
-            vectors[k] = {t: v / norm for t, v in vec.items()}
+        vectors, _ = tfidf_vectors(docs)
 
         out: list[PairScore] = []
         for i, a in enumerate(keys):
@@ -156,6 +138,79 @@ class LexicalScorer:
                 out.append(PairScore(a, b, round(score, 6), evidence))
         out.sort(key=lambda p: (-p.score, p.a, p.b))
         return out
+
+
+def tfidf_vectors(docs: dict[str, str]) -> tuple[dict[str, dict[str, float]], dict[str, float]]:
+    """Unit-normalised TF-IDF vectors for every doc, plus the corpus idf.
+
+    Shared by pairwise scoring (the sweep) and query scoring (query.py) so the
+    two cannot drift apart in how they read a note.
+    """
+    keys = sorted(docs)
+    tokens = {k: tokenize(docs[k]) for k in keys}
+    counts = {k: Counter(tokens[k]) for k in keys}
+    n_docs = len(keys)
+
+    doc_freq: Counter[str] = Counter()
+    for k in keys:
+        doc_freq.update(set(tokens[k]))
+
+    # Smoothed idf; terms in every document contribute ~0.
+    idf = {term: math.log((n_docs + 1) / (df + 1)) + 1e-9
+           for term, df in doc_freq.items()}
+
+    vectors: dict[str, dict[str, float]] = {}
+    for k in keys:
+        total = sum(counts[k].values()) or 1
+        vec = {t: (c / total) * idf[t] for t, c in counts[k].items()}
+        norm = math.sqrt(sum(v * v for v in vec.values())) or 1.0
+        vectors[k] = {t: v / norm for t, v in vec.items()}
+    return vectors, idf
+
+
+@dataclass(frozen=True)
+class QueryHit:
+    """One note scored against a free-text query, with the terms that matched."""
+
+    key: str
+    score: float
+    evidence: tuple[str, ...] = field(default=())
+
+
+def score_query(query: str, docs: dict[str, str],
+                evidence_terms: int = 5) -> tuple[list[QueryHit], list[str]]:
+    """Rank docs against a query by TF-IDF cosine; also report the query terms
+    the corpus never uses at all.
+
+    Returns ``(hits sorted best-first, missing_terms)``. A term absent from
+    every note is the most useful negative result a knowledge base can give:
+    it says "nothing here" rather than "weak match".
+    """
+    q_tokens = tokenize(query)
+    if not q_tokens or not docs:
+        return [], sorted(set(q_tokens))
+    vectors, idf = tfidf_vectors(docs)
+    q_counts = Counter(q_tokens)
+    total = sum(q_counts.values())
+    q_vec = {t: (c / total) * idf.get(t, 0.0) for t, c in q_counts.items()}
+    norm = math.sqrt(sum(v * v for v in q_vec.values())) or 1.0
+    q_vec = {t: v / norm for t, v in q_vec.items()}
+
+    hits: list[QueryHit] = []
+    for key, vec in vectors.items():
+        shared = set(q_vec) & set(vec)
+        if not shared:
+            continue
+        contributions = {t: q_vec[t] * vec[t] for t in shared}
+        score = sum(contributions.values())
+        if score <= 0:
+            continue
+        evidence = tuple(t for t, _ in sorted(contributions.items(),
+                                              key=lambda kv: (-kv[1], kv[0]))[:evidence_terms])
+        hits.append(QueryHit(key, round(score, 6), evidence))
+    hits.sort(key=lambda h: (-h.score, h.key))
+    missing = sorted(t for t in set(q_tokens) if t not in idf)
+    return hits, missing
 
 
 class EmbeddingScorer:
