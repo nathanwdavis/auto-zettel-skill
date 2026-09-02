@@ -47,13 +47,13 @@ while [[ $# -gt 0 ]]; do
     --dir) DIR="${2:-}"; shift 2 ;;
     --no-remote) NO_REMOTE=1; shift ;;
     -h|--help) usage; exit 0 ;;
-    *) usage >&2; die "unknown argument: $1" ;;
+    *) usage >&2; echo "error: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
-[[ -n "$NAME" ]] || { usage >&2; die "--name is required"; }
-[[ -n "$OWNER" ]] || { usage >&2; die "--owner is required"; }
-[[ -n "$TOPICS" ]] || { usage >&2; die "--topics is required"; }
+[[ -n "$NAME" ]] || { usage >&2; echo "error: --name is required" >&2; exit 2; }
+[[ -n "$OWNER" ]] || { usage >&2; echo "error: --owner is required" >&2; exit 2; }
+[[ -n "$TOPICS" ]] || { usage >&2; echo "error: --topics is required" >&2; exit 2; }
 case "$VISIBILITY" in
   public|private) ;;
   *) die "--visibility must be 'public' or 'private' (got '${VISIBILITY:-}')" ;;

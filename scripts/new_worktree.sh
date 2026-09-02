@@ -30,12 +30,12 @@ while [[ $# -gt 0 ]]; do
     --name) NAME="${2:-}"; shift 2 ;;
     --remove) REMOVE=1; shift ;;
     -h|--help) usage; exit 0 ;;
-    *) usage >&2; die "unknown argument: $1" ;;
+    *) usage >&2; echo "error: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
-[[ -n "$REPO" ]] || { usage >&2; die "--repo is required"; }
-[[ -n "$NAME" ]] || { usage >&2; die "--name is required"; }
+[[ -n "$REPO" ]] || { usage >&2; echo "error: --repo is required" >&2; exit 2; }
+[[ -n "$NAME" ]] || { usage >&2; echo "error: --name is required" >&2; exit 2; }
 [[ -d "$REPO/.git" ]] || die "not a git repository: $REPO"
 [[ "$NAME" =~ ^[A-Za-z0-9._/-]+$ ]] || die "invalid branch name: $NAME"
 

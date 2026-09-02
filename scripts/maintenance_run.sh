@@ -31,7 +31,7 @@ Usage: maintenance_run.sh --repo <content-repo> [--mailto <email>]
   --claude-bin  claude binary to invoke              [default: claude]
 
 Environment: CLAUDE_BIN, PYTHON, STALE_LOCK_HOURS override defaults.
-Exit codes: 0 ok (or lock held by a fresh run); non-zero on any failure.
+Exit codes: 0 ok (or lock held by a fresh run); 2 usage error; 1 any other failure.
 USAGE
 }
 
@@ -44,11 +44,11 @@ while [[ $# -gt 0 ]]; do
     --dry-run) DRY_RUN=1; shift ;;
     --claude-bin) CLAUDE_BIN="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
-    *) usage >&2; die "unknown argument: $1" ;;
+    *) usage >&2; echo "error: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
-[[ -n "$REPO" ]] || { usage >&2; die "--repo is required"; }
+[[ -n "$REPO" ]] || { usage >&2; echo "error: --repo is required" >&2; exit 2; }
 [[ -d "$REPO" ]] || die "not a directory: $REPO"
 REPO="$(cd "$REPO" && pwd)"
 command -v "$CLAUDE_BIN" >/dev/null 2>&1 || die "claude binary not found: $CLAUDE_BIN"
@@ -77,12 +77,9 @@ fi
 # --- config (AC-2: missing keys hard-fail) ------------------------------------
 CFG_JSON="$(PYTHONPATH="$SCRIPT_DIR" "$PYBIN" - "$REPO" <<'PYEOF'
 import json, sys
-from zettel_lib.repo import ContentRepo, dig
+from zettel_lib.repo import REQUIRED_CONFIG_KEYS, ContentRepo, dig
 repo = ContentRepo(sys.argv[1])
-cfg = repo.require_config(
-    "topics", "cadence", "budget.usd", "budget.max_turns", "autonomy_level",
-    "content_repo.name", "content_repo.owner", "content_repo.visibility",
-    "models.strong", "models.cheap", "connector_cadence", "skill_smith_cadence")
+cfg = repo.require_config(*REQUIRED_CONFIG_KEYS)
 print(json.dumps({
     "budget_usd": dig(cfg, "budget.usd"),
     "max_turns": dig(cfg, "budget.max_turns"),
@@ -108,8 +105,6 @@ else
   HAS_REMOTE=0
 fi
 PRE_HEAD="$(git -C "$REPO" rev-parse HEAD)"
-log "maintenance_run: start (mode=A dry_run=${DRY_RUN})"
-log "maintenance_run: step 1 lock acquired, pulled, HEAD=${PRE_HEAD:0:9}"
 
 # --- render prompt + agents JSON ----------------------------------------------
 VERIFY_ARGS="--offline"
@@ -119,6 +114,12 @@ PROMPT="$(sed -e "s|{{REPO}}|$REPO|g" -e "s|{{VERIFY_ARGS}}|$VERIFY_ARGS|g" \
   "$SCRIPT_DIR/maintenance_prompt.md")"
 AGENTS_JSON="$(PYTHONPATH="$SCRIPT_DIR" "$PYBIN" -m zettel_lib.agents --repo "$REPO")" \
   || die "failed to build agents JSON from config.yml"
+# NFR-2 asks for "agents dispatched" in the log. The wrapper cannot see which
+# delegations the session actually made, but it does know exactly which
+# definitions it handed over, and that is the set any dispatch draws from.
+AGENT_NAMES="$(PYTHONPATH="$SCRIPT_DIR" "$PYBIN" -m zettel_lib.agents --repo "$REPO" --names)"
+log "maintenance_run: start (mode=A dry_run=${DRY_RUN} agents=${AGENT_NAMES})"
+log "maintenance_run: step 1 lock acquired, pulled, HEAD=${PRE_HEAD:0:9}"
 
 # --- steps 2-10: the headless run (FR-25) -------------------------------------
 RESULTS_DIR="${RESULTS_DIR:-$REPO/../$(basename "$REPO")-runs}"
@@ -194,15 +195,25 @@ if [[ -n "$NEW_PROPOSAL" ]]; then
 fi
 
 # --- independent gates (amendment A3; NFR-3) ----------------------------------
-GATES_OK=1
-for gate in "build_manifest.py --check" "lint_citations.py" "lint_links.py" \
-            "lint_skills.py" "check_skill_sandbox.py --base $PRE_HEAD"; do
-  if ! PYTHONPATH="$SCRIPT_DIR" "$PYBIN" $SCRIPT_DIR/${gate%% *} --repo "$REPO" ${gate#*.py} >> "$RUN_LOG" 2>&1; then
-    log "maintenance_run: GATE FAILED ${gate%% *}; nothing pushed"
-    GATES_OK=0
-  fi
-done
-if [[ $GATES_OK -eq 0 ]]; then
+# One gate list, run before the first push AND after every merge in the retry
+# loop below. The retry used to re-run only the two lints, so a merge that
+# left manifest.json stale or a skill unit malformed could still be pushed.
+# The sandbox check stays pre-push only: its --base is this run's starting
+# HEAD, and after a merge that diff includes the other run's log.md lines,
+# which the append-only rule would then blame on this run.
+run_gates() {
+  local ok=1 gate
+  for gate in "$@"; do
+    if ! PYTHONPATH="$SCRIPT_DIR" "$PYBIN" $SCRIPT_DIR/${gate%% *} --repo "$REPO" ${gate#*.py} >> "$RUN_LOG" 2>&1; then
+      log "maintenance_run: GATE FAILED ${gate%% *}; nothing pushed"
+      ok=0
+    fi
+  done
+  [[ $ok -eq 1 ]]
+}
+MERGE_GATES=("build_manifest.py --check" "lint_citations.py" "lint_links.py" "lint_skills.py")
+
+if ! run_gates "${MERGE_GATES[@]}" "check_skill_sandbox.py --base $PRE_HEAD"; then
   echo "gate failure after headless run; commits preserved locally, nothing pushed (see $RUN_LOG)" >&2
   exit 1
 fi
@@ -230,10 +241,8 @@ for attempt in 1 2 3; do
   log "maintenance_run: push rejected (attempt $attempt); re-pulling and re-linting"
   git -C "$REPO" pull --no-rebase origin "$BRANCH" >> "$RUN_LOG" 2>&1 \
     || { log "maintenance_run: ABORT re-pull failed"; die "push retry: pull failed"; }
-  for lint in lint_citations.py lint_links.py; do
-    PYTHONPATH="$SCRIPT_DIR" "$PYBIN" "$SCRIPT_DIR/$lint" --repo "$REPO" >> "$RUN_LOG" 2>&1 \
-      || { log "maintenance_run: ABORT re-lint failed after merge"; die "push retry: $lint failed after merge"; }
-  done
+  run_gates "${MERGE_GATES[@]}" \
+    || { log "maintenance_run: ABORT re-lint failed after merge"; die "push retry: a gate failed after merge (see $RUN_LOG)"; }
 done
 log "maintenance_run: ABORT push failed after 3 attempts"
 die "push failed after 3 attempts; see $RUN_LOG"

@@ -217,6 +217,38 @@ def test_dirty_tree_refuses_to_run(repo_with_origin):
     assert "uncommitted changes" in result.stderr
 
 
+def test_push_rejection_re_pulls_and_re_runs_every_merge_gate(repo_with_origin):
+    """FR-28 step 10 / FR-30: a rejected push means re-pull, re-gate, retry.
+    The retry used to re-run only two lints, so a merge that left the manifest
+    stale or a skill unit malformed could still be pushed."""
+    repo, origin = repo_with_origin
+    before = origin_head(origin)
+
+    result = run_maintenance(repo, mode="race")
+    assert result.returncode == 0, result.stderr
+    assert origin_head(origin) != before
+
+    log = (repo / "log.md").read_text(encoding="utf-8")
+    assert "push rejected (attempt 1)" in log
+    assert "pushed" in log
+    # Every merge gate ran twice: once before the first push, once after the merge.
+    for gate in ("lint_citations", "lint_links", "lint_skills"):
+        assert log.count(f"{gate}: PASS") >= 2, f"{gate} did not re-run after the merge:\n{log}"
+
+
+def test_start_line_names_the_agents_handed_to_the_run(repo_with_origin):
+    """NFR-2: log.md records the agents dispatched. The wrapper knows exactly
+    which definitions it handed to claude -p, which is the set any dispatch
+    draws from."""
+    repo, _ = repo_with_origin
+    assert run_maintenance(repo).returncode == 0
+    log = (repo / "log.md").read_text(encoding="utf-8")
+    start = next(line for line in log.splitlines() if "maintenance_run: start" in line)
+    assert "mode=A" in start
+    for name in ("orchestrator", "critic", "skill-smith"):
+        assert name in start, start
+
+
 def test_missing_config_key_hard_fails(repo_with_origin):
     repo, _ = repo_with_origin
     import yaml
@@ -230,6 +262,26 @@ def test_missing_config_key_hard_fails(repo_with_origin):
     assert "config" in result.stderr.lower()
 
 
+def test_missing_embedding_key_hard_fails(repo_with_origin):
+    """FR-2 names embedding.{enabled,model}; they were the two keys nothing
+    required."""
+    repo, _ = repo_with_origin
+    import yaml
+    cfg = yaml.safe_load((repo / "config.yml").read_text(encoding="utf-8"))
+    del cfg["embedding"]["model"]
+    (repo / "config.yml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c",
+                    "user.email=t@localhost", "commit", "-aqm", "break config"], check=True)
+    result = run_maintenance(repo)
+    assert result.returncode != 0
+    assert "embedding.model" in result.stderr
+
+
 def test_help_exits_zero():
     result = subprocess.run([str(MAINTENANCE), "--help"], capture_output=True, text=True)
     assert result.returncode == 0 and "Usage:" in result.stdout
+
+
+def test_usage_error_exits_two(tmp_path):
+    result = subprocess.run([str(MAINTENANCE), "--bogus"], capture_output=True, text=True)
+    assert result.returncode == 2

@@ -162,10 +162,15 @@ def main(argv: list[str] | None = None) -> int:
                         help="rewrite the agent registry in DIR with the "
                              "models config.yml resolves, instead of printing "
                              "the JSON")
+    parser.add_argument("--names", action="store_true",
+                        help="print the registered agent names, comma-separated, "
+                             "instead of the JSON (for the NFR-2 log line)")
     args = parser.parse_args(argv)
     try:
         repo = ContentRepo(args.repo)
-        if args.materialize:
+        if args.names:
+            print(",".join(meta["name"] for meta in load_agents(args.agents_dir)))
+        elif args.materialize:
             written = materialize(repo, args.materialize, args.agents_dir)
             models = resolved_models(repo)
             print(f"agents: resolved {len(written)} definition(s) in "

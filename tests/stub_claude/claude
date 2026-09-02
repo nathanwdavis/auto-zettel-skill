@@ -13,6 +13,9 @@
 #                skill_review.py propose (the FR-35 happy path)
 #   smith-escape like smith, but also plants a file in the PLUGIN repo — the
 #                AC-37 write the wrapper must block and log
+#   race         like good, but also lands an unrelated commit on origin from a
+#                second clone, so the wrapper's first push is rejected and its
+#                re-pull/re-gate retry loop (FR-28 step 10) has to run
 
 set -euo pipefail
 
@@ -183,6 +186,18 @@ git -C "$REPO" -c user.name=stub -c user.email=stub@localhost \
 
 if [[ "$MODE" == "push" ]]; then
   git -C "$REPO" push origin "$(git -C "$REPO" branch --show-current)" || true
+fi
+
+if [[ "$MODE" == "race" ]]; then
+  # Touch a file the wrapper's merge can take cleanly (INBOX is prose and is
+  # not indexed); two appends to log.md would conflict instead of merging.
+  ORIGIN="$(git -C "$REPO" remote get-url origin)"
+  OTHER="$(mktemp -d)"
+  git clone -q "$ORIGIN" "$OTHER/clone"
+  printf '\n- new: a question filed while the run was busy\n' >> "$OTHER/clone/INBOX.md"
+  git -C "$OTHER/clone" -c user.name=other -c user.email=other@localhost \
+    commit -qam "capture from another machine"
+  git -C "$OTHER/clone" push -q origin "$(git -C "$REPO" branch --show-current)"
 fi
 
 if [[ "$MODE" == "overbudget" ]]; then

@@ -119,17 +119,41 @@ def test_start_survives_an_unresolvable_agent_registry(content_repo, tmp_path):
     repo, _ = content_repo
     registry = tmp_path / "agents"
     registry.mkdir()
-    (registry / "critic.md").symlink_to(PLUGIN_ROOT / "agents" / "critic.md")
-    config = repo / "config.yml"
-    config.write_text(
-        config.read_text(encoding="utf-8").replace("models:", "models_disabled:"),
-        encoding="utf-8")
+    # A registry entry that cannot be replaced (a directory where the file
+    # should be) makes materialize fail. A missing config key is no longer the
+    # way to provoke this: AC-2 now hard-fails start before any lock work --
+    # see the test below.
+    (registry / "critic.md").mkdir()
 
     result = cycle(repo, "start", agents_dir=registry)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip().startswith("zettel/run-")
     assert "\n" not in result.stdout.strip()
     assert "warning" in result.stderr
+
+
+def test_start_hard_fails_on_a_missing_config_key_before_claiming(content_repo):
+    """AC-2 on the remote path. Until now only the laptop wrapper validated
+    config.yml, so a repo missing `cadence` ran on a Routine and died on a
+    laptop. The check runs before any lock work, so nothing needs releasing."""
+    repo, origin = content_repo
+    config = repo / "config.yml"
+    config.write_text(config.read_text(encoding="utf-8").replace("cadence:", "cadence_x:", 1),
+                      encoding="utf-8")
+
+    result = cycle(repo, "start")
+    assert result.returncode == 1, result.stderr
+    assert "cadence" in result.stderr
+    assert result.stdout.strip() == ""
+    assert "zettel/lock" not in branches_on(origin)
+    assert current_branch(repo) == "main"
+
+
+def test_start_logs_the_mode(content_repo):
+    repo, _ = content_repo
+    assert cycle(repo, "start").returncode == 0
+    log = (repo / "log.md").read_text(encoding="utf-8")
+    assert "remote_cycle: start (mode=B " in log
 
 
 def test_second_container_stands_down_with_exit_3(content_repo, tmp_path):
@@ -514,4 +538,6 @@ def test_help_and_bad_subcommand(content_repo):
     repo, _ = content_repo
     assert subprocess.run([str(SCRIPT), "--help"], capture_output=True,
                           text=True).returncode == 0
-    assert cycle(repo, "frobnicate").returncode != 0
+    assert cycle(repo, "frobnicate").returncode == 2
+    assert subprocess.run([str(SCRIPT), "start"], capture_output=True,
+                          text=True).returncode == 2

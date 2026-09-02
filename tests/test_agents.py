@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 
 import pytest
 
@@ -55,6 +57,15 @@ def test_tier_defaults_match_fr29():
         meta = agents_mod.parse_agent(path)
         expected = "strong" if path.stem in STRONG else "cheap"
         assert agents_mod.tier_of(meta) == expected, path.stem
+
+
+def test_names_flag_lists_every_registered_agent(clean_repo):
+    """The wrapper stamps this list into log.md as the agents dispatched (NFR-2)."""
+    result = subprocess.run(
+        [sys.executable, "-m", "zettel_lib.agents", "--repo", str(clean_repo), "--names"],
+        capture_output=True, text=True, cwd=str(PLUGIN_ROOT / "scripts"))
+    assert result.returncode == 0, result.stderr
+    assert set(result.stdout.strip().split(",")) == EXPECTED
 
 
 def test_agents_json_resolves_models_from_config(clean_repo):
