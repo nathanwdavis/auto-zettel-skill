@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 
 import pytest
 
@@ -43,11 +45,13 @@ def test_agents_that_reach_the_web_use_pascalcase_tool_names(path):
         "tool names are PascalCase in Claude Code (WebSearch/WebFetch)"
 
 
-def test_research_facing_agents_carry_web_tools():
-    """FR-16's intent: agents that gather or check sources can reach the web."""
-    for name in ("orchestrator", "researcher", "synthesizer", "librarian"):
-        meta = agents_mod.parse_agent(AGENTS_DIR / f"{name}.md")
-        assert {"WebSearch", "WebFetch"} <= set(meta["tools"]), name
+@pytest.mark.parametrize("path", sorted(AGENTS_DIR.glob("*.md")), ids=lambda p: p.stem)
+def test_every_agent_can_reach_the_web(path):
+    """FR-16: all agents get web_search + web_fetch. The connector and smith
+    carry rails in their bodies about what the web is NOT for; the tools
+    themselves are unconditional."""
+    meta = agents_mod.parse_agent(path)
+    assert {"WebSearch", "WebFetch"} <= set(meta["tools"]), path.stem
 
 
 def test_tier_defaults_match_fr29():
@@ -55,6 +59,15 @@ def test_tier_defaults_match_fr29():
         meta = agents_mod.parse_agent(path)
         expected = "strong" if path.stem in STRONG else "cheap"
         assert agents_mod.tier_of(meta) == expected, path.stem
+
+
+def test_names_flag_lists_every_registered_agent(clean_repo):
+    """The wrapper stamps this list into log.md as the agents dispatched (NFR-2)."""
+    result = subprocess.run(
+        [sys.executable, "-m", "zettel_lib.agents", "--repo", str(clean_repo), "--names"],
+        capture_output=True, text=True, cwd=str(PLUGIN_ROOT / "scripts"))
+    assert result.returncode == 0, result.stderr
+    assert set(result.stdout.strip().split(",")) == EXPECTED
 
 
 def test_agents_json_resolves_models_from_config(clean_repo):

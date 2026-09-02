@@ -39,7 +39,7 @@ Usage: remote_cycle.sh <start|finish|abort|status|refresh-skill> --repo <content
   refresh-skill                           fast-forward this skill checkout itself
                                           (start also does this; takes no --repo)
 
-Exit codes: 0 ok; 3 lock held by a live run (not an error -- stand down); 1 failure.
+Exit codes: 0 ok; 3 lock held by a live run (not an error -- stand down); 2 usage error; 1 failure.
 USAGE
 }
 
@@ -51,7 +51,7 @@ while [[ $# -gt 0 ]]; do
     --ttl) TTL="${2:-}"; shift 2 ;;
     --title) TITLE="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
-    *) usage >&2; die "unknown argument: $1" ;;
+    *) usage >&2; echo "error: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
@@ -98,7 +98,7 @@ if [[ "$CMD" == "refresh-skill" ]]; then
   exit 0
 fi
 
-[[ -n "$REPO" ]] || { usage >&2; die "--repo is required"; }
+[[ -n "$REPO" ]] || { usage >&2; echo "error: --repo is required" >&2; exit 2; }
 [[ -d "$REPO/.git" ]] || die "not a git repository: $REPO"
 REPO="$(cd "$REPO" && pwd)"
 
@@ -176,6 +176,12 @@ print(f"lock: {info.holder} (session {info.session}, {info.age_hours():.2f}h old
       fi
     fi
 
+    # AC-2 on this path too: a content repo missing an FR-2 key used to fail
+    # only on a laptop, because only maintenance_run.sh validated. Checked
+    # before any lock work so a bad config never needs a release.
+    PYTHONPATH="$SCRIPT_DIR" "$PYBIN" -m zettel_lib.repo --repo "$REPO" --check-config >/dev/null \
+      || die "config.yml validation failed (see error above); fix config.yml and re-run"
+
     # Break a provably stale lock, then claim. A LIVE lock is never stolen:
     # two sessions researching the same inquiry pay for it twice.
     lockpy '
@@ -249,7 +255,7 @@ print("yes" if ok else f"no\t{holder.holder}\t{holder.session}\t{holder.age_hour
            "subagents run their checked-in tier aliases ($MATERIALIZED)" >&2
     fi
 
-    log "remote_cycle: start (holder=$HOLDER session=$SESSION branch=$BRANCH skill-rev=$(skill_rev))"
+    log "remote_cycle: start (mode=B holder=$HOLDER session=$SESSION branch=$BRANCH skill-rev=$(skill_rev))"
     echo "$BRANCH"
     ;;
 
@@ -359,5 +365,5 @@ print("yes" if ok else f"no\t{holder.holder}\t{holder.session}\t{holder.age_hour
     echo "lock released"
     ;;
 
-  *) usage >&2; die "unknown subcommand: $CMD" ;;
+  *) usage >&2; echo "error: unknown subcommand: $CMD" >&2; exit 2 ;;
 esac

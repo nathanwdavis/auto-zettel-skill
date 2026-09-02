@@ -165,7 +165,7 @@ what `lint_skills.py` and `check_skill_sandbox.py` enforce and where:
 
 A Routine fires a fresh remote session on a cloud environment whose setup
 script (`ci/setup-environment.sh`) has already installed this skill. The
-session claims a **git-ref lock** (`scripts/zettel_lib/gitlock.py` — a
+session claims a **git-branch lock** (`scripts/zettel_lib/gitlock.py` — a
 container-local lock file can't serialize two ephemeral containers), works on a
 `zettel/run-*` branch via `scripts/remote_cycle.sh`, and hands a PR to CI.
 `ci/content-repo-gates.yml`, installed in the content repo with `gates` as a
@@ -235,7 +235,7 @@ PLAN.md                      phase status and build order
 `scripts/zettel_lib/` is an addition to the layout the spec prescribes: the
 Python entry points share frontmatter parsing, note naming, repo access, HTTP,
 citation rendering, similarity scoring, and the git lock, and duplicating those
-across thirteen entry points would guarantee they drift.
+across seventeen entry points would guarantee they drift.
 
 ## Working on the skill itself
 
@@ -250,7 +250,7 @@ pip install -r requirements-dev.txt
 ./smoke_test.sh
 ```
 
-`smoke_test.sh` runs the full pytest suite (347 tests) plus an end-to-end
+`smoke_test.sh` runs the full pytest suite (380 tests) plus an end-to-end
 genesis scaffold. To run pytest alone, use the virtualenv's interpreter —
 `pytest` is generally not installed in the system python:
 
@@ -258,20 +258,19 @@ genesis scaffold. To run pytest alone, use the virtualenv's interpreter —
 .venv/bin/python -m pytest -q
 ```
 
-Two acceptance checks cannot run in a sandboxed or offline environment and are
-**manual steps on a networked machine**:
+Three acceptance checks cannot run in a sandboxed or offline environment and
+are **manual steps on a networked machine**:
 
 - `gh repo create` — the live publish path (`--no-remote` covers the rest).
 - Live metadata lookups — `verify_refs.py --repo <repo> --mailto you@example.org`
   against a real DOI and ISBN. The suite covers the parsing and state-writing
   with recorded-shape cassettes; see [`tests/cassettes/README.md`](tests/cassettes/README.md).
-
-The maintenance runner is tested with a stub `claude` binary (locking, gate
-enforcement, push authority) plus a real capped headless run where possible.
-
 - Live `sentence-transformers` scoring — the embedding path is unit-tested with
   an injected encoder; downloading real model weights needs network access to
   HuggingFace.
+
+The maintenance runner is tested with a stub `claude` binary (locking, gate
+enforcement, push authority) plus a real capped headless run where possible.
 
 ## Security
 

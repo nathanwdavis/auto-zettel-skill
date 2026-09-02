@@ -55,7 +55,7 @@ PATH="$(dirname "$PY"):$PATH" bash scripts/init_content_repo.sh \
   || fail "init_content_repo.sh"
 pass "substrate scaffolded ($(git -C "$KB" ls-files | wc -l | tr -d ' ') files committed)"
 
-for f in INBOX.md INDEX.md manifest.json config.yml log.md skill-impact.md .bib/refs.json; do
+for f in INBOX.md INDEX.md manifest.json config.yml log.md skill-impact.md .bib/refs.json .github/workflows/gates.yml; do
   git -C "$KB" ls-files --error-unmatch "$f" >/dev/null 2>&1 || fail "$f not committed"
 done
 pass "every substrate path is tracked (AC-1)"
@@ -320,8 +320,25 @@ from conftest import plant_skill
 repo = Path(sys.argv[1])
 plant_skill(repo, "keeper-skill", cite="stub-run-observation--209901010001")
 PYEOF
+# Inside an open cycle exactly one proposal may be recorded (FR-35/AC-35);
+# the marker below is what remote_cycle.sh start writes.
+echo "- \`$(date -u +%Y-%m-%dT%H:%M:%SZ)\` remote_cycle: start (mode=B holder=smoke branch=zettel/run-smoke)" >> "$SKB/log.md"
 "$PY" scripts/skill_review.py --repo "$SKB" propose --skill keeper-skill \
   --kind create --motivation "smoke promotion" >/dev/null || fail "propose keeper-skill"
+"$PY" - "$SKB" <<'PYEOF'
+import sys
+sys.path.insert(0, "tests"); sys.path.insert(0, "scripts")
+from pathlib import Path
+from conftest import plant_skill
+plant_skill(Path(sys.argv[1]), "greedy-skill", cite="stub-run-observation--209901010001")
+PYEOF
+"$PY" scripts/skill_review.py --repo "$SKB" propose --skill greedy-skill \
+  --kind create --motivation "a second one this cycle" >/dev/null 2>&1 \
+  && fail "a second proposal in one cycle must be refused (FR-35)"
+grep -q "REFUSED second proposal greedy-skill" "$SKB/log.md" || fail "second proposal not flagged"
+rm -rf "$SKB/skills/greedy-skill"
+pass "a second proposal in the same cycle was refused (FR-35/AC-35)"
+echo "- \`$(date -u +%Y-%m-%dT%H:%M:%SZ)\` remote_cycle: finish zettel/run-smoke (smoke)" >> "$SKB/log.md"
 git -C "$SKB" add -A && git -C "$SKB" -c user.name=smoke -c user.email=s@localhost \
   commit -q -m "smoke: keeper proposal"
 "$PY" scripts/skill_review.py --repo "$SKB" promote --skill keeper-skill \

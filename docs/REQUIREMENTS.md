@@ -9,9 +9,10 @@
 
 ## Amendments (applied during implementation)
 
-Recorded here rather than silently editing the prose above. Both were forced by
-facts checked against upstream at build time, exactly as the Caveats section
-anticipates.
+Recorded here rather than silently editing the prose above. The first two were
+forced by facts checked against upstream at build time, exactly as the Caveats
+section anticipates; the rest by implementation and by live runs. A9 is the
+record of a full spec-compliance review.
 
 ### A1 — CSL style filename (2026-08-30, FR-8, FR-13)
 
@@ -195,6 +196,75 @@ findings (issue #7). Five change spec-adjacent behavior:
   (remote-session clones lack it, and under pipefail the old probe killed
   every scheduled run); the default branch is asked of the remote, with
   `main` as last resort, in both `start` and `finish`.
+
+### A9 — Spec-compliance review (2026-09-02, FR-1, FR-2, FR-6, FR-8, FR-11, FR-13, FR-16, FR-23, FR-27, FR-28, FR-29, FR-35, FR-37, §7, §10, NFR-2, QA-3)
+
+A pass over this document against the code (`docs/SPEC_COMPLIANCE_REVIEW.md`)
+found gaps of three kinds. The functionality gaps were closed in code (config
+validation on the remote path, the FR-4 lint rules the templates only stated,
+a marketplace manifest, FR-16's tool sets, FR-35's one-proposal rule, the
+FR-27 next-steps, freshness checks in FR-28 step 4). What follows records
+the implementation choices that were defensible but unamended, so the spec
+and the code agree again:
+
+- **FR-1:** genesis also writes `.github/workflows/gates.yml` (a copy of
+  `ci/content-repo-gates.yml`). A5 made a CI required check the merge
+  authority for remote sessions, and a workflow that had to be copied by
+  hand went stale on the first live content repo.
+- **§10 and FR-32:** Routine-fired remote sessions (A5) are the *primary*
+  scheduled entrypoint, not a deferred option; laptop cron and desktop tasks
+  remain fully supported and are the only path with a hard per-run dollar
+  cap.
+- **AC-8:** `lint_citations.py` re-renders with the backend the note recorded
+  (`citation_renderer`); when that backend is not installed locally it warns
+  and skips the comparison rather than failing on a spurious cross-backend
+  mismatch, and it compares after whitespace, quote-glyph, and trailing-period
+  normalisation. Both are consequences of A1's two-backend world.
+- **FR-6:** only `answered` requires `result_notes`; `archived` may carry
+  none, so a question can be closed as no longer worth answering.
+- **FR-11 / QA-3:** a "sourced claim" is what the `SOURCED_CLAIM` heuristic
+  matches (attribution verbs, `per <Name>`, quotation marks); its known
+  false positives are documented in `references/note-types.md`. A permanent
+  note grounded only in `general-web` sources warns (`weak-sourcing`) and
+  never blocks — QA-3 asks that the tier be recorded, and open-web leads are
+  how research starts.
+- **FR-23:** `fetch_remote.py` has no `--token` flag. The token is env-only
+  (`GITHUB_TOKEN`/`GH_TOKEN`), which is NFR-4 read strictly.
+- **FR-27 steps 4–5:** the first orchestra pass is instructed by SKILL.md's
+  Genesis section, not dispatched by `init_content_repo.sh`; the script does
+  print the scheduling next-steps.
+- **FR-28 step 11:** folded into step 10 — INBOX and inquiry statuses are
+  updated *before* the commit so they are committed, and the lock is released
+  by the wrapper (Mode A) or `finish` (remote). There is no separate step-11
+  stamp in `log.md`; A3's claim that the observable order is unchanged
+  should be read with that fold.
+- **NFR-2 (remote):** the commit SHA cannot appear in `log.md` because the
+  `finish` line must precede the commit it describes; it goes to stdout and
+  the PR. `agents dispatched` is the set of definitions handed to the run
+  (Mode A) or materialized for it (remote), stamped on the start line.
+- **FR-29:** the connector is cheap-tier only. The strong-tier "justification"
+  the spec assigns to it is the critic's review of `proposed-links/`.
+- **FR-37 (remote):** nothing intercepts a remote session's writes; the rail
+  is structural — CI checks out a fresh plugin, so a tampered install cannot
+  reach the gate — and the `--strict` smith-scoped sandbox check is run by
+  the session itself in step 7. Per-run budget caps for the smith exist only
+  at whole-run granularity on the laptop path (A5).
+- **§7 preamble:** read-only tools (`inquiries.py`, `skill_review.py list`,
+  `new_worktree.sh`, `fetch_remote.py`) do not append to `log.md`; a query
+  is not an operation.
+- **FR-2:** `autonomy_level` is required and reserved; no code path reads it
+  yet. `content_repo.branch` is an optional key (default `main`).
+- **A5/A8 mechanics:** the lock is `LOCK.json` on branch `zettel/lock`, not
+  `refs/zettel/run-lock` (the git proxy permits only ordinary branches).
+  `ZETTEL_SKILL_REF` pins by naming the local branch at install time;
+  `refresh-skill` fast-forwards whatever branch is checked out.
+- **FR-13:** the tree gained `references/{serendipity,remote-execution,capture}.md`,
+  `scripts/{capture,inquiries,lint_skills,check_skill_sandbox,skill_review,skill_trial}.py`,
+  `scripts/{adhoc_research,remote_cycle}.sh`, the two prompt templates,
+  `scripts/zettel_lib/`, `ci/`, `docs/`, `tests/`, and
+  `.claude-plugin/marketplace.json`.
+- **FR-35:** now mechanical — `skill_review.py propose` refuses a second
+  proposal in the cycle `log.md` shows open (`second-proposal`).
 
 -----
 

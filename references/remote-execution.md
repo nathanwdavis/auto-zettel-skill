@@ -25,7 +25,7 @@ Routine (cron schedule)
 |---|---|---|
 | Scheduler | cron | Routine, fires a fresh session |
 | Agent | nested `claude -p` | the session itself |
-| Lock | `run.lock` on disk | a git ref (`refs/zettel/run-lock`) |
+| Lock | `run.lock` on disk | `LOCK.json` on branch `zettel/lock` |
 | Gates enforced by | the wrapper script | GitHub Actions required check |
 | Reaches main via | wrapper pushes after re-lint | auto-merge on green CI |
 | Cost ceiling | `--max-budget-usd` | cadence, prompt scope, model tier |
@@ -157,6 +157,19 @@ mean something. All three are one-time manual steps on the content repo:
 CI runs `verify_refs.py --offline` on purpose. It re-checks what the run
 recorded against the captures committed to `raw/`, so a gate can never pass
 because of a lucky live lookup at merge time.
+
+## Knobs and environment variables
+
+| Variable | Read by | Meaning |
+|---|---|---|
+| `ZETTEL_SKILL_REPO`, `ZETTEL_SKILL_REF`, `ZETTEL_INSTALL_DIR` | `ci/setup-environment.sh` | which skill repo/ref to clone, and where (`/opt/zettel-skill`) |
+| `ZETTEL_SKILL_REFRESHED` | `remote_cycle.sh start` | set by the re-exec after a self-refresh; also what the tests set to keep a developer checkout untouched |
+| `ZETTEL_AGENTS_DIR` | `remote_cycle.sh start` | the agent registry to materialize (default `~/.claude/agents`) |
+| `ZETTEL_RUN_HOLDER`, `ZETTEL_SESSION_ID` / `CLAUDE_SESSION_ID` | `remote_cycle.sh` | recorded in `LOCK.json` and the start line |
+| `PYTHON` | every shell entry point | interpreter override (the venv's, in tests) |
+
+CI runs `verify_refs.py --offline --no-render`: recorded state and raw/
+captures only, and no Chicago re-render, so the gate never needs the network.
 
 ## When a run stands down
 

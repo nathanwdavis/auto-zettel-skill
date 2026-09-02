@@ -2,7 +2,7 @@
 
 Guidance for developing **this skill**. It is not loaded by maintenance runs —
 `ci/setup-environment.sh` clones to `/opt/zettel-skill` and symlinks only
-`skills/`, so nothing here reaches a scheduled cycle's context.
+`skills/` and `agents/`, so nothing here reaches a scheduled cycle's context.
 
 ## What this repo is
 
@@ -17,7 +17,7 @@ variables. `.gitignore` covers `.env`, `*.token`, `*.pem`, `.netrc`, `run.lock`.
 ## Running things
 
 ```sh
-.venv/bin/python -m pytest -q      # 347 tests, ~135s
+.venv/bin/python -m pytest -q      # 380 tests, ~160s
 ./smoke_test.sh                    # pytest + end-to-end scaffold; exit 0 or it isn't done
 claude plugin validate --strict .
 ```
@@ -114,14 +114,17 @@ tidy document. `PLAN.md` tracks phase status and the build order.
   the model — it explains the failure mode that justifies the tool's existence.
 - **Shared logic goes in `scripts/zettel_lib/`**, never duplicated across entry
   points. Frontmatter, naming, repo access, HTTP, citations, similarity, and
-  the git lock all live there precisely so the thirteen entry points cannot drift.
+  the git lock all live there precisely so the seventeen entry points cannot drift.
 - **`--allowedTools` must be one quoted comma-separated argument.** Split
   across shell words, space-containing patterns like `Bash(git add:*)` shatter
   and silently deny commits mid-run. `tests/stub_claude` asserts this.
 - Lints emit `FILE\tRULE\tREASON` and exit 1; usage errors exit 2. Scripts that
   advise rather than gate (the sweep) always exit 0.
-- Every script takes `--repo`, answers `--help`, and appends to the content
-  repo's `log.md` (spec §7).
+- Every script takes `--repo` and answers `--help`; every script that *acts*
+  appends to the content repo's `log.md` (spec §7). Read-only tools
+  (`inquiries.py`, `skill_review.py list`, `new_worktree.sh`,
+  `fetch_remote.py`, whose `--repo` is a GitHub name) do not — a query is not
+  an operation (A9).
 
 ## Git workflow
 

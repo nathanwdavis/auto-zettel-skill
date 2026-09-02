@@ -79,6 +79,27 @@ def test_malformed_frontmatter_exits_non_zero(clean_repo):
     assert "frontmatter" in result.stderr.lower()
 
 
+def test_non_iso_updated_stamp_is_rejected(clean_repo):
+    """FR-3: `updated` is ISO-8601. It was copied verbatim, so a free-text
+    date sorted nowhere for Mode-B readers."""
+    note = load(clean_repo, f"permanent/{PERM_KEY}.md")
+    note.meta["updated"] = "last tuesday"
+    note.save()
+    result = run_script("build_manifest.py", clean_repo)
+    assert result.returncode != 0
+    assert "ISO-8601" in result.stderr
+
+
+def test_iso_datetime_stamps_are_accepted(clean_repo):
+    note = load(clean_repo, f"permanent/{PERM_KEY}.md")
+    note.meta["updated"] = "2026-08-30T10:00:00Z"
+    note.save()
+    result = run_script("build_manifest.py", clean_repo)
+    assert result.returncode == 0, result.stderr
+    entry = next(e for e in read_manifest(clean_repo)["notes"] if e["key"] == PERM_KEY)
+    assert entry["updated"] == "2026-08-30T10:00:00Z"
+
+
 def test_check_flag_detects_staleness(clean_repo):
     assert run_script("build_manifest.py", clean_repo, "--check").returncode == 0
     note = load(clean_repo, f"permanent/{PERM_KEY}.md")

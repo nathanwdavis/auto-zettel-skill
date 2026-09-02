@@ -88,7 +88,11 @@ def test_raw_edit_and_delete_are_caught_but_additions_pass(git_repo):
     (git_repo / "raw" / "new-capture.txt").write_text("fresh\n", encoding="utf-8")
     assert check(git_repo).returncode == 0
 
-    capture = next(p for p in (git_repo / "raw").iterdir() if p.name != ".gitkeep")
+    # The TRACKED capture, chosen deterministically: iterdir() order is
+    # filesystem-dependent and on some runners handed back the untracked
+    # new-capture.txt, whose edit is (correctly) still just an addition.
+    capture = next(p for p in sorted((git_repo / "raw").iterdir())
+                   if p.name not in (".gitkeep", "new-capture.txt"))
     capture.write_text("doctored\n", encoding="utf-8")
     result = check(git_repo)
     assert "raw-modified" in rules(result)

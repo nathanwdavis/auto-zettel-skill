@@ -111,6 +111,36 @@ def _require_clean_index(repo: ContentRepo) -> None:
 
 # -- propose -------------------------------------------------------------------
 
+#: log.md lines that open a cycle and lines that close one. A proposal is
+#: "this cycle's" when the newest open marker has no close marker after it.
+CYCLE_OPEN = ("maintenance_run: start (", "remote_cycle: start (")
+CYCLE_CLOSE = ("maintenance_run: headless run complete", "maintenance_run: ABORT",
+               "maintenance_run: SANDBOX VIOLATION", "remote_cycle: finish ",
+               "remote_cycle: lock released")
+PROPOSED = "skill-smith: proposed "
+
+
+def proposal_this_cycle(repo: ContentRepo) -> str:
+    """The skill already proposed in the open cycle, or "" (FR-35, AC-35).
+
+    "Exactly one proposal per cycle" was prose in the smith's definition and
+    both prompts; nothing refused a second one. The cycle is read from log.md:
+    the wrapper and remote_cycle.sh stamp its start, and the headless run
+    completing (laptop) or `finish`/abort (remote) closes it. A hand-run
+    propose outside any open cycle is always allowed -- that is how a human
+    records a proposal of their own.
+    """
+    newest = ""
+    for line in reversed(repo.log_lines()):
+        if line.startswith(CYCLE_CLOSE):
+            return ""
+        if line.startswith(CYCLE_OPEN):
+            return newest
+        if line.startswith(PROPOSED) and not newest:
+            newest = line[len(PROPOSED):].split(" ", 1)[0]
+    return ""
+
+
 def cmd_propose(repo: ContentRepo, args) -> int:
     _require_git(repo)
     skill = args.skill
@@ -124,6 +154,14 @@ def cmd_propose(repo: ContentRepo, args) -> int:
         print(f"skills/{skill}\tre-proposed-skill\ta create of this name was "
               "rejected in skill-impact.md and is never retried (AC-36)")
         repo.append_log(f"skill-smith: REFUSED re-proposal of rejected create {skill}")
+        return EXIT_VIOLATION
+
+    earlier = proposal_this_cycle(repo)
+    if earlier:
+        print(f"skills/{skill}\tsecond-proposal\tthis cycle already proposed "
+              f"{earlier}; FR-35 allows exactly one proposal per cycle")
+        repo.append_log(f"skill-smith: REFUSED second proposal {skill} "
+                        f"(this cycle already proposed {earlier})")
         return EXIT_VIOLATION
 
     # A patch re-enters review carrying the PURPOSE.md of an earlier proposal,

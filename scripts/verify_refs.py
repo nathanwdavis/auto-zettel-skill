@@ -57,7 +57,7 @@ def _identifier_lookup(csl: dict, *, mailto: str, transport) -> tuple[str, str] 
         if data and (data.get("message") or {}).get("DOI"):
             return "crossref", f"https://doi.org/{doi}"
 
-    arxiv_id = _arxiv_id(csl)
+    arxiv_id = citations.arxiv_id(csl)
     if arxiv_id:
         saw_identifier = True
         url = ARXIV.format(arxiv_id=quote(arxiv_id))
@@ -134,22 +134,12 @@ def verify_note(
     return False, "", "", ""
 
 
-def _arxiv_id(csl: dict) -> str:
-    for field in ("arxiv", "arXiv", "number"):
-        value = str(csl.get(field) or "").strip()
-        if value:
-            return value.replace("arXiv:", "")
-    url = str(csl.get("URL") or "")
-    if "arxiv.org/abs/" in url:
-        return url.rsplit("/", 1)[-1]
-    return ""
-
-
 def _raw(url: str, transport) -> str | None:
-    try:
-        resp = transport(url, {"User-Agent": "zettel-bootstrap/0.1"})
-    except http.NetworkUnavailable:
-        return None
+    """Fetch a non-JSON registry page. NetworkUnavailable propagates, like the
+    JSON lookups: swallowing it here made a dead network on an arXiv-only
+    reference read as a definitive miss (and, with a capture present, as a
+    rotted identifier) instead of degrading to capture-only (NFR-5)."""
+    resp = transport(url, {"User-Agent": "zettel-bootstrap/0.1"})
     return resp.body if resp.status == 200 else None
 
 
@@ -177,8 +167,17 @@ def run(repo: ContentRepo, *, offline: bool, mailto: str, transport=http.request
     verified = total = 0
     degraded = False
 
-    for note in repo.notes(types=["reference"]):
+    for path in repo.note_paths(types=["reference"]):
         total += 1
+        try:
+            note = Note.load(path)
+        except FrontmatterError as exc:
+            # One unparseable note used to stop the whole run (exit 0, with
+            # every later note silently unprocessed). Report it and go on;
+            # lint_citations fails the note itself.
+            print(f"warning: {exc}; skipping", file=sys.stderr)
+            print(f"{repo.rel(path)}\tSKIPPED (malformed frontmatter)")
+            continue
         try:
             ok, method, source, id_check = verify_note(
                 note, repo, offline=offline, mailto=mailto, transport=transport)

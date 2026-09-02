@@ -15,6 +15,7 @@ INIT = SCRIPTS / "init_content_repo.sh"
 EXPECTED_FILES = {
     "INBOX.md", "INDEX.md", "manifest.json", "config.yml", "log.md",
     "skill-impact.md", "README.md", ".gitignore", ".bib/refs.json",
+    ".github/workflows/gates.yml",  # A9: the merge gate ships with the repo
 }
 EXPECTED_DIRS = {
     "fleeting", "literature", "permanent", "reference", "moc",
@@ -119,6 +120,29 @@ def test_missing_required_argument_is_rejected(tmp_path):
         capture_output=True, text=True)
     assert result.returncode != 0
     assert "--owner is required" in result.stderr
+
+
+def test_gates_workflow_is_the_plugin_copy(scaffolded):
+    """The gate that decides what reaches main used to be a manual copy that
+    went stale on the first live repo (PLAN.md handoff item 2)."""
+    installed = (scaffolded / ".github" / "workflows" / "gates.yml").read_bytes()
+    assert installed == (SCRIPTS.parent / "ci" / "content-repo-gates.yml").read_bytes()
+
+
+def test_genesis_prints_scheduling_next_steps(tmp_path):
+    """FR-27 step 5: a cron template plus the desktop/Cowork and Routine notes."""
+    result, _ = scaffold(tmp_path)
+    assert result.returncode == 0, result.stderr
+    out = result.stdout
+    assert "maintenance_run.sh" in out and "0 6 * * 0" in out, out
+    assert "Cowork" in out and "remote_cycle.sh" in out
+    assert "gates" in out and "required" in out.lower()
+
+
+def test_content_gitignore_covers_nfr4(scaffolded):
+    ignored = (scaffolded / ".gitignore").read_text(encoding="utf-8").split()
+    for entry in ("run.lock", ".env", "*.token", "*.pem", ".netrc", "__pycache__/"):
+        assert entry in ignored, entry
 
 
 def test_help_exits_zero():

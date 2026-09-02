@@ -33,12 +33,17 @@ updated: "{{DATE}}"
 ---
 
 <!--
-FR-4/FR-10: exactly ONE reference note per source. `chicago_note` and
-`chicago_bib` are generated from csl_json -- run verify_refs.py, never hand-edit
-them. A reference is only usable once verification.verified is true, by raw
-capture on disk or an authoritative metadata lookup.
-Scripture (FR-9): set scripture: true and source_tier: primary-text; cite
-book-chapter-verse per SBL and it is excluded from the bibliography.
+FR-4/FR-10: exactly ONE reference note per source -- lint_citations fails two
+notes sharing a DOI/ISBN/PMID/arXiv id/URL (`duplicate-source`). `chicago_note`
+and `chicago_bib` are generated from csl_json -- run verify_refs.py, never
+hand-edit them. A reference is only usable once verification.verified is true,
+by raw capture on disk or an authoritative metadata lookup.
+Keep every field above: source_tier (one of the four values; `bad-source-tier`
+otherwise), raw_capture, and all four verification keys are required
+(`missing-field`).
+Scripture (FR-9): set scripture: true AND source_tier: primary-text
+(`scripture-tier`); cite book-chapter-verse per SBL and it is excluded from
+the bibliography.
 -->
 
 Bibliographic record. Notes on provenance, edition, or access go here.

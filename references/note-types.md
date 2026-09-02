@@ -50,20 +50,25 @@ outbound typed link. Every sourced claim links to a *verified* reference note �
 `lint_citations.py` looks for attribution language ("argues", "shows that",
 quotation marks) and fails the note if nothing verified is linked.
 
-A note tagged `contested` needs **three or more** distinct verified references.
+A note tagged `contested` needs **three or more** distinct verified *sources*
+— counted by DOI/ISBN/PMID/arXiv id/URL, so three reference notes for one book
+are one source.
 
 > "Atomic notes compound over time" is a claim. "Notes" is not.
 
 ### literature
 An own-words summary of **exactly one** source, with a locator (page, section,
-timestamp). Links to exactly one reference note. Never paste source prose here —
+timestamp). Links to exactly one reference note, and its `reference` field names
+that same note; `lint_links.py` fails an empty locator (`missing-locator`) and a
+disagreeing field (`reference-mismatch`). Never paste source prose here —
 verbatim text belongs in `raw/`.
 
 ### reference
-Exactly one per source. Carries `csl_json`, the rendered `chicago_note` and
-`chicago_bib`, `source_tier`, a `verification` block, and `raw_capture`.
-The Chicago strings are generated — never hand-written. See
-`citation-rules.md`.
+Exactly one per source — two notes sharing a DOI/ISBN/PMID/arXiv id/URL fail
+`duplicate-source`. Carries `csl_json`, the rendered `chicago_note` and
+`chicago_bib`, `source_tier` (one of four values), a `verification` block with
+all four keys, and `raw_capture`; a missing field is `missing-field`. The
+Chicago strings are generated — never hand-written. See `citation-rules.md`.
 
 ### fleeting
 A short-lived capture. Swept each cycle: promoted to a literature or permanent
@@ -75,7 +80,8 @@ hand — a malformed file here fails the next run's manifest build.
 ### moc (structure)
 A map of content. `INDEX.md` links **only** to MOCs; MOCs link to notes. The
 layering keeps the root readable as the graph grows, and `lint_links.py`
-enforces it.
+enforces both hops (`layering` for INDEX, `moc-empty` for a MOC that links to
+nothing).
 
 ## The 1-1-1 rule
 

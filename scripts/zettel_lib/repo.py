@@ -17,6 +17,18 @@ SUBSTRATE_DIRS = NOTE_DIRS + (INQUIRY_DIR, "raw", "skills", "proposed-links", ".
 #: FR-6 lifecycle. A run works `new` first and never touches `archived`.
 INQUIRY_STATUSES = ("new", "in-progress", "answered", "archived")
 
+#: Every FR-2 key, as dotted paths. The one list both maintenance paths
+#: validate against (AC-2): the laptop wrapper used to carry its own copy and
+#: the remote path had none, so a content repo missing `cadence` ran fine on
+#: a Routine and died on a laptop. `autonomy_level` is required because FR-2
+#: names it, though no code path reads it yet (A9).
+REQUIRED_CONFIG_KEYS = (
+    "topics", "cadence", "budget.usd", "budget.max_turns", "autonomy_level",
+    "content_repo.name", "content_repo.owner", "content_repo.visibility",
+    "embedding.enabled", "embedding.model",
+    "models.strong", "models.cheap", "connector_cadence", "skill_smith_cadence",
+)
+
 
 class ContentRepoError(RuntimeError):
     pass
@@ -89,6 +101,23 @@ class ContentRepo:
         with log.open("a", encoding="utf-8") as fh:
             fh.write(f"- `{stamp}` {message}\n")
 
+    def log_lines(self) -> list[str]:
+        """The run log's entry lines, oldest first, without the stamp prefix.
+
+        Read-only companion to append_log for the few places that need to
+        know what THIS cycle has already done (the FR-35 one-proposal guard).
+        Lines that are not "- <stamp> message" entries (the heading, blank
+        lines) are dropped.
+        """
+        log = self.root / "log.md"
+        if not log.exists():
+            return []
+        out = []
+        for line in log.read_text(encoding="utf-8").splitlines():
+            if line.startswith("- `") and "` " in line[3:]:
+                out.append(line[3:].split("` ", 1)[1])
+        return out
+
 
 def dig(data: dict, dotted: str):
     cur = data
@@ -97,3 +126,33 @@ def dig(data: dict, dotted: str):
             return None
         cur = cur[part]
     return cur
+
+
+def main(argv: list[str] | None = None) -> int:
+    """`python -m zettel_lib.repo --repo <path> --check-config`
+
+    The shell entry points cannot import require_config, so this is how
+    remote_cycle.sh and maintenance_run.sh both validate config.yml against
+    the same key list before doing any work.
+    """
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(description="content-repo config checks (AC-2)")
+    parser.add_argument("--repo", required=True, type=Path)
+    parser.add_argument("--check-config", action="store_true",
+                        help="hard-fail unless every FR-2 key is present")
+    args = parser.parse_args(argv)
+    try:
+        repo = ContentRepo(args.repo)
+        if args.check_config:
+            repo.require_config(*REQUIRED_CONFIG_KEYS)
+            print(f"config.yml: all {len(REQUIRED_CONFIG_KEYS)} required keys present")
+    except ContentRepoError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

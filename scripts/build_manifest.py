@@ -11,6 +11,7 @@ paths plus GitHub API contents paths, and never an anonymous raw URL.
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import sys
 from pathlib import Path
@@ -38,6 +39,35 @@ def api_path_for(cfg: dict, rel_path: str) -> str:
     owner = dig(cfg, "content_repo.owner") or ""
     name = dig(cfg, "content_repo.name") or ""
     return API_URL.format(owner=owner, repo=name, path=rel_path)
+
+
+def stamp(note: Note, rel: str) -> str:
+    """The entry's `updated` (FR-3: ISO-8601), falling back to `created`.
+
+    Validated because the manifest is what Mode-B readers and the freshness
+    sweep sort by; a free-text date sorts nowhere. Accepts a date or a
+    datetime (YAML already turns an unquoted 2026-08-30 into a date object).
+    """
+    chosen = ""
+    for field in ("updated", "created"):
+        value = note.meta.get(field)
+        if value in (None, ""):
+            continue
+        if isinstance(value, (_dt.date, _dt.datetime)):
+            # An unquoted YAML date parses to an object; str() of a datetime
+            # uses a space separator, so normalise to the same ISO form a
+            # quoted string would have carried.
+            text = value.isoformat()
+        else:
+            text = str(value).strip()
+            try:
+                _dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except ValueError:
+                raise FrontmatterError(
+                    f"{rel}: '{field}' is {text!r}, not an ISO-8601 date (FR-3)") from None
+        if not chosen:
+            chosen = text
+    return chosen
 
 
 def build(repo: ContentRepo) -> dict:
@@ -71,7 +101,7 @@ def build(repo: ContentRepo) -> dict:
             ),
             "path": rel,
             "url_or_apipath": url_for(repo, cfg, rel, visibility),
-            "updated": str(note.meta.get("updated") or note.meta.get("created") or ""),
+            "updated": stamp(note, rel),
         }
         if visibility != "public":
             entry["api_path"] = api_path_for(cfg, rel)
@@ -115,7 +145,7 @@ def build_inquiries(repo: ContentRepo) -> list[dict]:
             "priority": note.priority,
             "result_notes": sorted(note.result_notes),
             "path": rel,
-            "updated": str(note.meta.get("updated") or note.meta.get("created") or ""),
+            "updated": stamp(note, rel),
         })
     out.sort(key=lambda item: item["key"])
     return out

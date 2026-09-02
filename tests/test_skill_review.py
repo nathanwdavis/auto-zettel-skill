@@ -81,6 +81,32 @@ def test_propose_refuses_a_rejected_create(git_repo):
     assert "re-proposed-skill" in result.stdout
 
 
+def test_second_proposal_in_one_cycle_is_refused(git_repo):
+    """FR-35/AC-35: exactly one proposal per cycle, mechanically. The cycle is
+    read from log.md's start/finish markers; outside an open cycle a hand-run
+    propose is always allowed."""
+    repo = ContentRepo(git_repo)
+    repo.append_log("remote_cycle: start (mode=B holder=test branch=zettel/run-1)")
+    assert propose(git_repo, "first-skill").returncode == 0
+
+    result = propose(git_repo, "second-skill")
+    assert result.returncode == 1
+    assert "second-proposal" in result.stdout and "first-skill" in result.stdout
+    assert "REFUSED second proposal second-skill" in (git_repo / "log.md").read_text()
+    assert [r.skill for r in impact.records(repo)] == ["first-skill"]
+
+    repo.append_log("remote_cycle: finish zettel/run-1 (skill-rev=abc; lock released after push)")
+    assert propose(git_repo, "third-skill").returncode == 0, "next cycle may propose again"
+
+
+def test_propose_outside_any_cycle_is_allowed_after_a_closed_one(git_repo):
+    repo = ContentRepo(git_repo)
+    repo.append_log("maintenance_run: start (mode=A dry_run=0 agents=critic)")
+    assert propose(git_repo, "first-skill").returncode == 0
+    repo.append_log("maintenance_run: headless run complete (result: x.json)")
+    assert propose(git_repo, "by-hand").returncode == 0
+
+
 def test_list_reports_status(git_repo):
     propose(git_repo)
     result = review(git_repo, "list", "--json")

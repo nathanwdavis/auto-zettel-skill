@@ -62,10 +62,10 @@ machine. For the skill to exist there it must be:
 - committed to the cloned repo's `.claude/skills/` directory, or
 - shipped in a plugin the repo declares.
 
-Cloud Routines could invoke maintenance on a schedule, but that path is
-deferred (spec §10): per-plan daily run caps apply, and the skill must be
-present in the cloud session by one of the routes above. The documented,
-supported schedulers are laptop cron and desktop/Cowork tasks.
+Cloud Routines are the primary scheduler for unattended growth (amendments
+A5, A9; the section above and `remote-execution.md`). Per-plan daily run
+caps apply, and the skill must be present in the cloud session — which is
+what `ci/setup-environment.sh` arranges.
 
 ## What a scheduled run guarantees
 
@@ -74,7 +74,8 @@ supported schedulers are laptop cron and desktop/Cowork tasks.
 2. Preflight: clean tree required; `git pull --ff-only` before work.
 3. Budget: `--max-budget-usd` and `--max-turns` from config.yml; a cutoff run
    exits non-zero, keeps its commits local, and pushes nothing.
-4. Gates: `build_manifest --check`, `lint_citations`, `lint_links` re-run by
-   the wrapper after the model finishes; push only on pass, with up to three
-   re-pull/re-lint retries on rejection.
+4. Gates: `build_manifest --check`, `lint_citations`, `lint_links`,
+   `lint_skills`, and `check_skill_sandbox` re-run by the wrapper after the
+   model finishes; push only on pass, with up to three re-pull/re-gate
+   retries on rejection (the sandbox check is pre-push only).
 5. Audit: every step stamped in the content repo's `log.md`.

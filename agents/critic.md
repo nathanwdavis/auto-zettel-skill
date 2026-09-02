@@ -1,7 +1,7 @@
 ---
 name: critic
 description: Reviews new and changed notes in a zettel-bootstrap content repository for groundedness against their cited sources, atomicity, clarity, and link quality. Delegate to it after synthesis and before the librarian, and to review proposed links. It gates what merges.
-tools: [Read, Grep, Glob, Bash, WebFetch]
+tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
 model: opus
 ---
 

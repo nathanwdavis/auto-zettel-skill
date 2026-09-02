@@ -2,7 +2,10 @@
 """Link, layering, and note-identity lint (FR-21).
 
 Enforces the FR-5 relation taxonomy, resolvability of every [[key]] and typed
-link, the INDEX -> MOC -> note layering (FR-4), and the 1-1-1 rule (FR-4).
+link, the INDEX -> MOC -> note layering (FR-4, both hops: INDEX may link only
+to MOCs, and a MOC must link to at least one note), and the 1-1-1 rule (FR-4)
+including a literature note's locator and its agreement between the
+`reference` field and its single source link.
 Also enforces the note-key naming amendment: a file's stem must equal its
 frontmatter `key`, and that key must decompose into its own `slug` and `id`;
 and the FR-6 inquiry lifecycle (AC-6), where an `answered` question must point
@@ -117,6 +120,35 @@ def lint(repo: ContentRepo) -> list[Violation]:
                 violations.append(Violation(
                     rel, "one-to-one",
                     f"literature note links to {len(refs)} reference notes; exactly 1 required"))
+            else:
+                # The `reference` field is what readers and Mode-B tooling use
+                # to find the source without walking links; it must name the
+                # same note the typed link does.
+                field = str(note.meta.get("reference") or "").strip()
+                linked = resolve(str(refs[0].get("target_id", "")), keys, id_to_key)
+                if not field:
+                    violations.append(Violation(
+                        rel, "reference-mismatch",
+                        f"literature note has no 'reference' field; expected '{linked}'"))
+                elif resolve(field, keys, id_to_key) != linked:
+                    violations.append(Violation(
+                        rel, "reference-mismatch",
+                        f"'reference' field '{field}' is not the linked reference note '{linked}'"))
+            if not str(note.meta.get("locator") or "").strip():
+                violations.append(Violation(
+                    rel, "missing-locator",
+                    "literature note has no locator (page, section, timestamp) -- FR-4"))
+
+        # -- layering, second hop: a MOC must link to notes -------------------
+        # INDEX -> MOC is checked in lint_layering; an empty MOC is a dead end
+        # for a Mode-B reader walking down from INDEX.
+        if note.type == "moc":
+            outbound = {str(l.get("target_id", "")) for l in note.links}
+            outbound |= {m.group(1) for m in WIKILINK.finditer(note.body)}
+            if not outbound:
+                violations.append(Violation(
+                    rel, "moc-empty",
+                    "MOC links to no notes; MOCs link to notes (FR-4)"))
 
         # -- duplicate ids -----------------------------------------------------
         # id_to_key is many-to-one, so a collision here would be invisible: the

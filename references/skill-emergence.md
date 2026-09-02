@@ -69,6 +69,19 @@ Budget rails: Mode A passes `--max-budget-usd`/`--max-turns` from config.yml;
 a remote session has no budget flag (amendment A5), so remote cost is bounded
 by cadence, prompt scope, model tier, and the trial's fixed call count.
 
+## Command surface
+
+- `skill_review.py propose --skill <name> --kind <create|patch> --motivation "..." [--base <ref>]`
+  — the smith's final act; `--base` is the ref the FR-36 diff is captured
+  against (default `HEAD`). Refuses a re-proposed rejected create
+  (`re-proposed-skill`) and a second proposal in the open cycle
+  (`second-proposal`, FR-35).
+- `skill_review.py list [--json]`, `promote --skill --reason [--scores <trial.json>]`,
+  `reject --skill --reason [--scores ...]`.
+- `skill_trial.py --skill <name> [--questions N] [--model <id>] [--max-turns N] [--out <file>] [--seed N]`
+  — the A/B trial; defaults come from config.yml (`trial_questions`,
+  `models.cheap`).
+
 ## skill-impact.md format
 
 The genesis 5-column table stays as the index; every event also appends a

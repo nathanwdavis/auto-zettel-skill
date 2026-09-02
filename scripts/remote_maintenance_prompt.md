@@ -45,13 +45,20 @@ agent. Every new source must be captured into raw/ before its reference note
 exists.
 
 Step 4. Routine maintenance: delegate to the `note-maintainer` agent for the
-fleeting sweep, INBOX-driven revisions, and link repair.
+fleeting sweep, INBOX-driven revisions, link repair, and freshness checks:
+re-verify references whose `verification.date` is older than 180 days or
+whose bare `raw-capture` method sits beside a DOI/ISBN/PMID/arXiv id, and
+re-fetch web sources. A rotted identifier or a vanished page is an INBOX
+entry for the researcher, never a deleted note.
 
 Step 5. Connector sweep — ONLY if config.yml `connector_cadence` is due (check
 log.md for the last `serendipity_sweep:` entry). If due:
     {{PYTHON}} {{SCRIPTS}}/serendipity_sweep.py --repo {{REPO}}
 then delegate to the `connector` agent to read both notes of each candidate,
-keep and justify the real ones, and delete the rest.
+keep and justify the real ones, and delete the rest. The critic then reviews
+what survives: accepted links are written into BOTH notes, rejections logged.
+The sweep never edits notes and always exits 0 — a degraded scorer is a
+logged warning, not a failure.
 
 Step 6. Delegate to the `critic` agent to gate every new or changed note:
 groundedness (flag < 0.80, block < 0.70), atomicity, clarity, link quality.
