@@ -55,7 +55,7 @@ PATH="$(dirname "$PY"):$PATH" bash scripts/init_content_repo.sh \
   || fail "init_content_repo.sh"
 pass "substrate scaffolded ($(git -C "$KB" ls-files | wc -l | tr -d ' ') files committed)"
 
-for f in INBOX.md INDEX.md manifest.json config.yml log.md skill-impact.md .bib/refs.json; do
+for f in INBOX.md INDEX.md manifest.json config.yml log.md skill-impact.md .bib/refs.json .github/workflows/gates.yml; do
   git -C "$KB" ls-files --error-unmatch "$f" >/dev/null 2>&1 || fail "$f not committed"
 done
 pass "every substrate path is tracked (AC-1)"

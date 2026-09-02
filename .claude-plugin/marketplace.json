@@ -1,0 +1,15 @@
+{
+  "name": "auto-zettel-skill",
+  "owner": {
+    "name": "nathanwdavis"
+  },
+  "description": "Marketplace for the zettel-bootstrap plugin: a citation-grounded, self-growing Zettelkasten on GitHub.",
+  "plugins": [
+    {
+      "name": "zettel-bootstrap",
+      "source": "./",
+      "description": "Scaffolds and perpetually grows a citation-grounded Zettelkasten knowledge repository on GitHub, with hard lint gates that reject any claim not traceable to a verified source.",
+      "version": "0.1.0"
+    }
+  ]
+}

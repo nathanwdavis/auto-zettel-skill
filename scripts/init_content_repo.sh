@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Scaffold and publish a zettelkasten content repository (FR-18).
 #
-# Creates the FR-1 substrate, writes config.yml from the bundled template,
-# makes the initial commit, and (unless --no-remote) creates the GitHub remote
-# and pushes. Exits non-zero with an actionable message on any failure, and
+# Creates the FR-1 substrate (plus the CI gate workflow, amendment A9), writes
+# config.yml from the bundled template, makes the initial commit, (unless
+# --no-remote) creates the GitHub remote and pushes, then prints the
+# scheduling next-steps (FR-27 step 5). Exits non-zero with an actionable message on any failure, and
 # refuses to clobber an existing repository.
 
 set -euo pipefail
@@ -34,6 +35,35 @@ USAGE
 }
 
 die() { echo "error: $*" >&2; exit 1; }
+
+# FR-27 step 5: how to keep the repo growing, printed once the scaffold is
+# committed (and, on the gh path, published). The same content lives in
+# references/scheduling.md and remote-execution.md; here so the person who
+# just ran genesis does not have to go looking for it.
+next_steps() {
+  cat <<STEPS
+
+Next steps -- scheduling maintenance (FR-27):
+
+  1. One-time GitHub settings on ${OWNER}/${NAME} (Settings -> Rules / General):
+       - make the "gates" status check REQUIRED on main
+       - enable "Allow auto-merge" and "Automatically delete head branches"
+     Without the required check a red PR still merges on a click.
+
+  2. Pick a scheduler:
+     - Laptop cron (runs while the machine is awake):
+         0 6 * * 0  cd ${DIR} && ${SCRIPT_DIR}/maintenance_run.sh --repo ${DIR} --mailto you@example.org >> ${DIR}/../maintenance.log 2>&1
+     - Claude Code Desktop / Cowork scheduled task: same command; runs only
+       while the app is open (references/scheduling.md).
+     - Fully remote, no laptop: a Routine that runs scripts/remote_cycle.sh in
+       a cloud environment set up by ci/setup-environment.sh
+       (references/remote-execution.md). This is the primary path.
+
+  3. Do the first knowledge pass now: capture one source per topic into raw/,
+     write its reference + literature notes, distil one permanent note, add a
+     MOC and link it from INDEX.md, run the gates, commit (SKILL.md, "Genesis").
+STEPS
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -159,16 +189,26 @@ run.lock
 __pycache__/
 *.py[cod]
 .venv/
+.pytest_cache/
 .env
 *.token
+*.pem
+.netrc
 .DS_Store
 IGNORE
+
+# The merge gate (amendments A5, A9): a required status check on `gates` is
+# what decides what reaches main from a remote session, and a copy that has
+# to be made by hand went stale on the first live repo. Installed at genesis
+# so a new content repo is gated from its first PR.
+mkdir -p .github/workflows
+cp "${PLUGIN_ROOT}/ci/content-repo-gates.yml" .github/workflows/gates.yml
 
 cat > README.md <<README
 # ${NAME}
 
 A citation-grounded Zettelkasten, cultivated by the
-[\`zettel-bootstrap\`](https://github.com/${OWNER}) Claude Code skill.
+[\`zettel-bootstrap\`](https://github.com/nathanwdavis/auto-zettel-skill) Claude Code skill.
 
 **Topics:** ${TOPICS}
 
@@ -191,6 +231,7 @@ A citation-grounded Zettelkasten, cultivated by the
 | \`skills/\` | Self-authored child skills, pending human promotion. |
 | \`.bib/refs.json\` | Aggregated CSL-JSON bibliography. |
 | \`log.md\` | Append-only run log. |
+| \`.github/workflows/gates.yml\` | The lint gates as a status check; make \`gates\` required on \`main\`. |
 
 ## Ground rules
 
@@ -227,6 +268,7 @@ echo "scaffolded ${DIR} ($(git ls-files | wc -l | tr -d ' ') files committed)"
 if [[ "$NO_REMOTE" -eq 1 ]]; then
   echo "--no-remote: skipped GitHub creation. Push manually with:"
   echo "  gh repo create ${OWNER}/${NAME} --${VISIBILITY} --source=. --remote=origin --push"
+  next_steps
   exit 0
 fi
 
@@ -234,3 +276,4 @@ gh repo create "${OWNER}/${NAME}" "--${VISIBILITY}" --source=. --remote=origin -
   die "gh repo create failed; the local scaffold at ${DIR} is intact and committed"
 
 echo "published https://github.com/${OWNER}/${NAME}"
+next_steps
