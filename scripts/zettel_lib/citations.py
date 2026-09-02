@@ -172,3 +172,45 @@ def validate_csl(item: dict) -> list[str]:
     if authors is not None and not isinstance(authors, list):
         problems.append("csl_json 'author' must be a list")
     return problems
+
+
+def arxiv_id(item: dict) -> str:
+    """The arXiv identifier a CSL item carries, or "" (shared by verify_refs)."""
+    for field in ("arxiv", "arXiv", "number"):
+        value = str(item.get(field) or "").strip()
+        if value:
+            return value.replace("arXiv:", "")
+    url = str(item.get("URL") or "")
+    if "arxiv.org/abs/" in url:
+        return url.rsplit("/", 1)[-1]
+    return ""
+
+
+def source_identity(item: dict) -> str:
+    """A key that is the same for two CSL items describing one source (FR-4).
+
+    "Exactly one reference note per source" and FR-12's "independent sources"
+    both need a notion of *which source*, and the CSL id is not it: every note
+    mints its own. Registry identifiers are, in order of how unambiguous they
+    are; a normalised URL is the fallback for web sources, and an item with
+    nothing to go on returns "" so callers can fall back to the note itself.
+    """
+    if not isinstance(item, dict):
+        return ""
+    doi = str(item.get("DOI") or "").strip().lower()
+    if doi:
+        return f"doi:{doi.removeprefix('https://doi.org/')}"
+    isbn = re.sub(r"[^0-9Xx]", "", str(item.get("ISBN") or "")).upper()
+    if isbn:
+        return f"isbn:{isbn}"
+    pmid = str(item.get("PMID") or "").strip()
+    if pmid:
+        return f"pmid:{pmid}"
+    arxiv = arxiv_id(item)
+    if arxiv:
+        return f"arxiv:{arxiv.lower()}"
+    url = str(item.get("URL") or "").strip().lower()
+    if url:
+        url = re.sub(r"^https?://(www\.)?", "", url).rstrip("/")
+        return f"url:{url}"
+    return ""

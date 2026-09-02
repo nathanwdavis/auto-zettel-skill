@@ -57,7 +57,7 @@ def _identifier_lookup(csl: dict, *, mailto: str, transport) -> tuple[str, str] 
         if data and (data.get("message") or {}).get("DOI"):
             return "crossref", f"https://doi.org/{doi}"
 
-    arxiv_id = _arxiv_id(csl)
+    arxiv_id = citations.arxiv_id(csl)
     if arxiv_id:
         saw_identifier = True
         url = ARXIV.format(arxiv_id=quote(arxiv_id))
@@ -132,17 +132,6 @@ def verify_note(
     if hit and hit[0]:
         return True, hit[0], hit[1], ""
     return False, "", "", ""
-
-
-def _arxiv_id(csl: dict) -> str:
-    for field in ("arxiv", "arXiv", "number"):
-        value = str(csl.get(field) or "").strip()
-        if value:
-            return value.replace("arXiv:", "")
-    url = str(csl.get("URL") or "")
-    if "arxiv.org/abs/" in url:
-        return url.rsplit("/", 1)[-1]
-    return ""
 
 
 def _raw(url: str, transport) -> str | None:

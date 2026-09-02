@@ -4,8 +4,14 @@
 Hard-fails the run (non-zero exit) on:
   * any reference note whose verification.verified is not true (FR-11);
   * any malformed or stale Chicago string (FR-11);
+  * a reference note missing the FR-4 fields (source_tier, raw_capture, the
+    four verification keys), carrying a source_tier outside the QA-3
+    vocabulary, or marked scripture without the primary-text tier (AC-9);
+  * two reference notes describing the same source (FR-4: exactly one per source);
   * any permanent-note sourced claim with no link to a verified reference (FR-11, QA-2);
-  * any note tagged `contested` with fewer than 3 distinct reference links (FR-12).
+  * any note tagged `contested` grounded in fewer than 3 distinct SOURCES (FR-12) --
+    distinct by registry identifier, not by reference-note key, or three
+    notes for one DOI would count as independent.
 
 Chicago strings are re-rendered from the note's own CSL-JSON and compared. The
 re-render uses the backend recorded in `citation_renderer`; when that backend is
@@ -34,8 +40,16 @@ CONTESTED_MIN_SOURCES = 3
 # claim; a note grounded only in general web has been discovered but not yet
 # verified against a primary source. That is a normal, temporary state -- so it
 # warns rather than blocks.
+SOURCE_TIERS = ("peer-reviewed", "primary-text", "reputable-secondary", "general-web")
 STRONG_TIERS = {"peer-reviewed", "primary-text", "reputable-secondary"}
 WEAK_TIER = "general-web"
+SCRIPTURE_TIER = "primary-text"
+
+#: The FR-4 reference-note fields a template writes and a hand-written note
+#: forgets. Presence is checked; emptiness only where a verified note makes
+#: the value load-bearing (see _lint_reference).
+REFERENCE_FIELDS = ("source_tier", "raw_capture", "verification")
+VERIFICATION_FIELDS = ("method", "source", "verified", "date")
 
 # A permanent note makes a "sourced claim" when it cites, quotes, or attributes.
 # "per" only counts as attribution when aimed at a named source ("per Smith",
@@ -67,8 +81,10 @@ def lint(repo: ContentRepo) -> tuple[list[Violation], list[str]]:
     }
     available = set(citations.available_backends())
 
-    for note in (n for n in notes if n.type == "reference"):
+    references = [n for n in notes if n.type == "reference"]
+    for note in references:
         violations.extend(_lint_reference(repo, note, available, warnings))
+    violations.extend(_lint_duplicate_sources(repo, references))
 
     for note in (n for n in notes if n.type == "permanent"):
         violations.extend(_lint_permanent(repo, note, by_key, id_to_key, verified_refs))
@@ -77,11 +93,69 @@ def lint(repo: ContentRepo) -> tuple[list[Violation], list[str]]:
     return violations, warnings
 
 
+def _identity(note: Note) -> str:
+    """What source a reference note describes; its own key when it cannot say."""
+    csl = note.meta.get("csl_json")
+    return citations.source_identity(csl if isinstance(csl, dict) else {}) or f"note:{note.key}"
+
+
+def _lint_duplicate_sources(repo, references) -> list[Violation]:
+    """FR-4: exactly one reference note per source (both notes are named)."""
+    by_identity: dict[str, list[Note]] = {}
+    for note in references:
+        by_identity.setdefault(_identity(note), []).append(note)
+    out = []
+    for identity, group in by_identity.items():
+        if len(group) < 2:
+            continue
+        for note in group:
+            others = ", ".join(repo.rel(o.path) for o in group if o is not note)
+            out.append(Violation(
+                repo.rel(note.path), "duplicate-source",
+                f"describes the same source ({identity}) as {others}; "
+                "FR-4 allows exactly one reference note per source"))
+    return out
+
+
 def _lint_reference(repo, note, available, warnings) -> list[Violation]:
     rel = repo.rel(note.path)
     out: list[Violation] = []
 
     verification = note.meta.get("verification") or {}
+    if not isinstance(verification, dict):
+        verification = {}
+
+    # FR-4 field completeness. The template writes every one of these; a note
+    # written by hand, or by a model paraphrasing the template, drops them,
+    # and a missing raw_capture used to mean "unverifiable" only after the
+    # next verify_refs run noticed.
+    for field in REFERENCE_FIELDS:
+        if field not in note.meta:
+            out.append(Violation(rel, "missing-field", f"reference note has no '{field}' field (FR-4)"))
+    if "verification" in note.meta:
+        for field in VERIFICATION_FIELDS:
+            if field not in verification:
+                out.append(Violation(rel, "missing-field",
+                                     f"verification block has no '{field}' key (FR-4)"))
+    if verification.get("verified") is True:
+        method = str(verification.get("method") or "")
+        if not str(verification.get("date") or "").strip():
+            out.append(Violation(rel, "missing-field",
+                                 "verification.date is empty for a verified reference"))
+        if "raw-capture" in method and not str(note.meta.get("raw_capture") or "").strip():
+            out.append(Violation(rel, "missing-field",
+                                 "verification.method says raw-capture but raw_capture is empty"))
+
+    tier = str(note.meta.get("source_tier") or "").strip()
+    if "source_tier" in note.meta and tier not in SOURCE_TIERS:
+        out.append(Violation(
+            rel, "bad-source-tier",
+            f"source_tier '{tier}' is not one of {'|'.join(SOURCE_TIERS)} (QA-3)"))
+    if note.meta.get("scripture") and tier != SCRIPTURE_TIER:
+        out.append(Violation(
+            rel, "scripture-tier",
+            f"scripture: true requires source_tier: {SCRIPTURE_TIER} (AC-9), got '{tier}'"))
+
     if verification.get("verified") is not True:
         out.append(Violation(
             rel, "unverified-reference",
@@ -146,11 +220,14 @@ def _lint_permanent(repo, note, by_key, id_to_key, verified_refs) -> list[Violat
             rel, "uncited-claim",
             "permanent note makes a sourced claim but links to no verified reference note"))
 
-    if "contested" in note.tags and len(verified_linked) < CONTESTED_MIN_SOURCES:
-        out.append(Violation(
-            rel, "contested-undersourced",
-            f"note is tagged 'contested' but links to {len(verified_linked)} verified "
-            f"reference(s); {CONTESTED_MIN_SOURCES} independent sources required"))
+    if "contested" in note.tags:
+        sources = {_identity(by_key[k]) for k in verified_linked}
+        if len(sources) < CONTESTED_MIN_SOURCES:
+            out.append(Violation(
+                rel, "contested-undersourced",
+                f"note is tagged 'contested' but is grounded in {len(sources)} distinct "
+                f"verified source(s) across {len(verified_linked)} reference note(s); "
+                f"{CONTESTED_MIN_SOURCES} independent sources required"))
     return out
 
 
