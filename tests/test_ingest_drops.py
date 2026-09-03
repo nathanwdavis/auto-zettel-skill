@@ -150,7 +150,9 @@ def test_text_drops_are_accepted_as_their_own_capture(clean_repo):
                        "source_tier": "general-web"})
     results = ingest_drops.ingest(ContentRepo(clean_repo), offline=True)
     assert results[0]["capture"].endswith(".md")
-    assert not (clean_repo / results[0]["capture"]).with_suffix(".txt").exists() or True
+    note = load(clean_repo, f"reference/{results[0]['key']}.md")
+    assert note.meta["source_tier"] == "general-web"
+    assert note.meta["csl_json"]["URL"] == "https://example.org/post"
     gates_pass(clean_repo)
 
 
