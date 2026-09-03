@@ -12,12 +12,19 @@ revised its rate limits effective 2025-12-01).
 Exits 0 even when some references remain unverified -- it records state, and
 lint_citations.py is the gate (FR-22). Network failure degrades gracefully to
 raw-capture verification only, logged as a warning (NFR-5).
+
+Open access (amendment A11): a DOI is also resolved through Unpaywall and
+OpenAlex, and the legal free copy's URL is recorded as
+``verification.open_access``. The researcher fetches that instead of failing
+on a publisher page; nothing is downloaded here, because this tool records
+state and never writes outside a note's frontmatter.
 """
 
 from __future__ import annotations
 
 import datetime as _dt
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
@@ -26,9 +33,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from zettel_lib import citations, http
 from zettel_lib.cli import EXIT_OK, base_parser, open_repo
 from zettel_lib.frontmatter import FrontmatterError, Note
-from zettel_lib.repo import ContentRepo
+from zettel_lib.repo import ContentRepo, dig
 
 CROSSREF = "https://api.crossref.org/works/{doi}?mailto={mailto}"
+UNPAYWALL = "https://api.unpaywall.org/v2/{doi}?email={mailto}"
+OPENALEX = "https://api.openalex.org/works/https://doi.org/{doi}?mailto={mailto}"
 ARXIV = "https://export.arxiv.org/api/query?id_list={arxiv_id}"
 PUBMED = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
           "?db=pubmed&retmode=json&id={pmid}")
@@ -86,6 +95,42 @@ def _identifier_lookup(csl: dict, *, mailto: str, transport) -> tuple[str, str] 
     return ("", "") if saw_identifier else None
 
 
+def _open_access_lookup(doi: str, *, mailto: str, transport) -> str:
+    """The URL of a legal open-access copy for a DOI, or "" (A11).
+
+    Unpaywall first (it requires a contact email and is skipped without one),
+    then OpenAlex, which needs none. Both index only legitimately open copies
+    -- author-sharing sites are deliberately absent -- so a URL here is one
+    the researcher may capture. NetworkUnavailable propagates so the caller
+    degrades (the arXiv lesson: swallowing it turned a dead network into a
+    definitive miss).
+    """
+    if mailto:
+        data = http.get_json(UNPAYWALL.format(doi=quote(doi, safe="/"), mailto=quote(mailto)),
+                             transport=transport)
+        best = (data or {}).get("best_oa_location") or {}
+        url = str(best.get("url_for_pdf") or best.get("url") or "").strip()
+        if url:
+            return url
+    data = http.get_json(OPENALEX.format(doi=quote(doi, safe="/"), mailto=quote(mailto)),
+                         transport=transport)
+    best = (data or {}).get("best_oa_location") or {}
+    url = str(best.get("pdf_url") or best.get("landing_page_url") or
+              ((data or {}).get("open_access") or {}).get("oa_url") or "").strip()
+    return url
+
+
+@dataclass(frozen=True)
+class Verification:
+    """What one verify_note call established (A8 semantics, A11 open access)."""
+
+    verified: bool
+    method: str
+    source: str
+    identifier_check: str = ""
+    open_access: str = ""
+
+
 def verify_note(
     note: Note,
     repo: ContentRepo,
@@ -93,8 +138,8 @@ def verify_note(
     offline: bool,
     mailto: str,
     transport=http.requests_transport,
-) -> tuple[bool, str, str, str]:
-    """Return ``(verified, method, source, identifier_check)`` for one note.
+) -> Verification:
+    """Establish ``Verification`` for one note.
 
     A raw capture verifies on its own, but it used to also END the check, so
     a wrong or rotted DOI on a captured source was never caught (issue #7).
@@ -116,22 +161,34 @@ def verify_note(
 
     if capture_ok:
         if offline:
-            return True, "raw-capture", capture, ""
+            return Verification(True, "raw-capture", capture)
         hit = _identifier_lookup(csl, mailto=mailto, transport=transport)
         if hit is None:
-            return True, "raw-capture", capture, ""
+            return Verification(True, "raw-capture", capture)
         method, source = hit
         if method:
-            return True, f"raw-capture+{method}", source, "confirmed"
-        return True, "raw-capture", capture, "failed"
+            return Verification(True, f"raw-capture+{method}", source, "confirmed")
+        return Verification(True, "raw-capture", capture, "failed")
 
     if offline:
-        return False, "", "", ""
+        return Verification(False, "", "")
 
+    # No capture yet: besides verifying the identifier, find where a legal
+    # free copy lives so the researcher can capture that (A11).
+    doi = str(csl.get("DOI") or "").strip()
+    open_access = ""
+    if doi:
+        try:
+            open_access = _open_access_lookup(doi, mailto=mailto, transport=transport)
+        except http.NetworkUnavailable:
+            # Enrichment, not verification: an unreachable OA registry must not
+            # block a Crossref check that still works. A dead network still
+            # surfaces below, from the identifier lookup itself.
+            open_access = ""
     hit = _identifier_lookup(csl, mailto=mailto, transport=transport)
     if hit and hit[0]:
-        return True, hit[0], hit[1], ""
-    return False, "", "", ""
+        return Verification(True, hit[0], hit[1], "", open_access)
+    return Verification(False, "", "", "", open_access)
 
 
 def _raw(url: str, transport) -> str | None:
@@ -179,7 +236,7 @@ def run(repo: ContentRepo, *, offline: bool, mailto: str, transport=http.request
             print(f"{repo.rel(path)}\tSKIPPED (malformed frontmatter)")
             continue
         try:
-            ok, method, source, id_check = verify_note(
+            result = verify_note(
                 note, repo, offline=offline, mailto=mailto, transport=transport)
         except http.NetworkUnavailable as exc:
             if not degraded:
@@ -187,8 +244,10 @@ def run(repo: ContentRepo, *, offline: bool, mailto: str, transport=http.request
                       "degrading to raw-capture verification only", file=sys.stderr)
                 repo.append_log("verify_refs: WARNING network unavailable, raw-capture only")
                 degraded = True
-            ok, method, source, id_check = verify_note(
+            result = verify_note(
                 note, repo, offline=True, mailto=mailto, transport=transport)
+        ok, method, source, id_check = (result.verified, result.method,
+                                        result.source, result.identifier_check)
 
         old = dict(note.meta.get("verification") or {})
         new = {
@@ -198,6 +257,12 @@ def run(repo: ContentRepo, *, offline: bool, mailto: str, transport=http.request
         }
         if id_check:
             new["identifier_check"] = id_check
+        # An open-access URL found earlier stays recorded until a capture
+        # exists (an offline re-check must not erase it); a fresh one wins.
+        open_access = result.open_access or (str(old.get("open_access") or "")
+                                             if not ok or "raw-capture" not in method else "")
+        if open_access:
+            new["open_access"] = open_access
 
         # Only write when the verification STATE changed; a re-check that
         # found the same state keeps the old date. Unconditional saves turned
@@ -238,9 +303,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     repo = open_repo(args.repo)
 
+    if not args.mailto:
+        # config.yml's fetch.mailto is the standing contact address (A11);
+        # the flag still wins when a caller has a reason to differ.
+        try:
+            args.mailto = str(dig(repo.config(), "fetch.mailto") or "")
+        except Exception:  # noqa: BLE001 - a broken config is the gates' problem, not ours
+            args.mailto = ""
     if not args.offline and not args.mailto:
-        print("warning: no --mailto given; Crossref requests will use the public pool",
-              file=sys.stderr)
+        print("warning: no --mailto given and config fetch.mailto is empty; Crossref "
+              "uses the public pool and Unpaywall is skipped", file=sys.stderr)
 
     try:
         verified, total = run(repo, offline=args.offline, mailto=args.mailto,

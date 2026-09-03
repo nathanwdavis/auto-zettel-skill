@@ -89,11 +89,11 @@ def test_empty_capture_is_unverified(clean_repo):
 
 def test_crossref_doi_lookup_verifies(clean_repo):
     note = set_csl(clean_repo, DOI="10.1145/3477132.3483540")
-    ok, method, source, _ = verify_refs.verify_note(
+    v = verify_refs.verify_note(
         note, repo_of(clean_repo), offline=False, mailto="me@example.org",
         transport=cassette(**{"api.crossref.org": CROSSREF_OK}))
-    assert (ok, method) == (True, "crossref")
-    assert source == "https://doi.org/10.1145/3477132.3483540"
+    assert (v.verified, v.method) == (True, "crossref")
+    assert v.source == "https://doi.org/10.1145/3477132.3483540"
 
 
 def test_crossref_request_carries_mailto_for_the_polite_pool(clean_repo):
@@ -120,45 +120,45 @@ def test_crossref_backs_off_on_429_then_succeeds(clean_repo):
 
 def test_reference_that_misses_every_lookup_is_not_verified(clean_repo):
     note = set_csl(clean_repo, DOI="10.9999/does-not-exist")
-    ok, method, _, _ = verify_refs.verify_note(
+    v = verify_refs.verify_note(
         note, repo_of(clean_repo), offline=False, mailto="me@example.org",
         transport=cassette(**{"api.crossref.org": CROSSREF_MISS,
                               "openlibrary.org": OPENLIBRARY_MISS,
                               "googleapis.com": GOOGLEBOOKS_MISS}))
-    assert (ok, method) == (False, "")
+    assert (v.verified, v.method) == (False, "")
 
 
 def test_isbn_verifies_via_open_library(clean_repo):
     note = set_csl(clean_repo)
-    ok, method, _, _ = verify_refs.verify_note(
+    v = verify_refs.verify_note(
         note, repo_of(clean_repo), offline=False, mailto="me@example.org",
         transport=cassette(**{"openlibrary.org": OPENLIBRARY_OK}))
-    assert (ok, method) == (True, "openlibrary")
+    assert (v.verified, v.method) == (True, "openlibrary")
 
 
 def test_isbn_falls_back_to_google_books(clean_repo):
     note = set_csl(clean_repo)
-    ok, method, _, _ = verify_refs.verify_note(
+    v = verify_refs.verify_note(
         note, repo_of(clean_repo), offline=False, mailto="me@example.org",
         transport=cassette(**{"openlibrary.org": OPENLIBRARY_MISS,
                               "googleapis.com": GOOGLEBOOKS_OK}))
-    assert (ok, method) == (True, "googlebooks")
+    assert (v.verified, v.method) == (True, "googlebooks")
 
 
 def test_arxiv_id_verifies(clean_repo):
     note = set_csl(clean_repo, drop=["ISBN"], URL="https://arxiv.org/abs/2608.27454")
-    ok, method, _, _ = verify_refs.verify_note(
+    v = verify_refs.verify_note(
         note, repo_of(clean_repo), offline=False, mailto="me@example.org",
         transport=cassette(**{"arxiv.org": ARXIV_OK}))
-    assert (ok, method) == (True, "arxiv")
+    assert (v.verified, v.method) == (True, "arxiv")
 
 
 def test_pubmed_pmid_verifies(clean_repo):
     note = set_csl(clean_repo, drop=["ISBN"], PMID="12345678")
-    ok, method, _, _ = verify_refs.verify_note(
+    v = verify_refs.verify_note(
         note, repo_of(clean_repo), offline=False, mailto="me@example.org",
         transport=cassette(**{"eutils.ncbi.nlm.nih.gov": PUBMED_OK}))
-    assert (ok, method) == (True, "pubmed")
+    assert (v.verified, v.method) == (True, "pubmed")
 
 
 # --- capture + identifier together (issue #7, finding 4) ----------------------
@@ -173,23 +173,23 @@ def with_doi_and_capture(repo, doi="10.1145/3477132.3483540"):
 
 def test_capture_plus_confirmed_doi_upgrades_the_method(clean_repo):
     note = with_doi_and_capture(clean_repo)
-    ok, method, source, id_check = verify_refs.verify_note(
+    v = verify_refs.verify_note(
         note, repo_of(clean_repo), offline=False, mailto="me@example.org",
         transport=cassette(**{"api.crossref.org": CROSSREF_OK}))
-    assert (ok, method, id_check) == (True, "raw-capture+crossref", "confirmed")
-    assert source == "https://doi.org/10.1145/3477132.3483540"
+    assert (v.verified, v.method, v.identifier_check) == (True, "raw-capture+crossref", "confirmed")
+    assert v.source == "https://doi.org/10.1145/3477132.3483540"
 
 
 def test_capture_with_rotted_doi_stays_verified_but_flags_it(clean_repo):
     """The capture is the documented either/or basis, so verification holds --
     but a DOI no registry knows must be visible, not silent."""
     note = with_doi_and_capture(clean_repo, doi="10.9999/rotted")
-    ok, method, _, id_check = verify_refs.verify_note(
+    v = verify_refs.verify_note(
         note, repo_of(clean_repo), offline=False, mailto="me@example.org",
         transport=cassette(**{"api.crossref.org": CROSSREF_MISS,
                               "openlibrary.org": OPENLIBRARY_MISS,
                               "googleapis.com": GOOGLEBOOKS_MISS}))
-    assert (ok, method, id_check) == (True, "raw-capture", "failed")
+    assert (v.verified, v.method, v.identifier_check) == (True, "raw-capture", "failed")
 
     verify_refs.run(repo_of(clean_repo), offline=False, mailto="me@example.org",
                     transport=cassette(**{"api.crossref.org": CROSSREF_MISS,
@@ -204,9 +204,87 @@ def test_capture_with_rotted_doi_stays_verified_but_flags_it(clean_repo):
 def test_offline_capture_never_attempts_a_lookup(clean_repo):
     note = with_doi_and_capture(clean_repo)
     transport = cassette()  # any call would raise NetworkUnavailable
-    ok, method, _, id_check = verify_refs.verify_note(
+    v = verify_refs.verify_note(
         note, repo_of(clean_repo), offline=True, mailto="", transport=transport)
-    assert (ok, method, id_check) == (True, "raw-capture", "")
+    assert (v.verified, v.method, v.identifier_check) == (True, "raw-capture", "")
+
+
+# --- open access (A11) ---------------------------------------------------------
+
+OA_PDF = "https://repo.example.edu/files/paper.pdf"
+UNPAYWALL_OK = http.Response(200, json.dumps({
+    "doi": "10.1145/3477132.3483540", "is_oa": True,
+    "best_oa_location": {"url_for_pdf": OA_PDF, "url": "https://repo.example.edu/paper"}}), {})
+UNPAYWALL_CLOSED = http.Response(200, json.dumps({
+    "doi": "10.1145/3477132.3483540", "is_oa": False, "best_oa_location": None}), {})
+OPENALEX_OK = http.Response(200, json.dumps({
+    "id": "https://openalex.org/W1", "open_access": {"is_oa": True, "oa_url": OA_PDF},
+    "best_oa_location": {"pdf_url": OA_PDF, "landing_page_url": "https://arxiv.org/abs/x"}}), {})
+OPENALEX_MISS = http.Response(404, "", {})
+
+
+def test_unpaywall_records_the_open_access_copy_for_a_doi(clean_repo):
+    note = set_csl(clean_repo, DOI="10.1145/3477132.3483540")
+    transport = cassette(**{"api.crossref.org": CROSSREF_OK, "api.unpaywall.org": UNPAYWALL_OK})
+    v = verify_refs.verify_note(note, repo_of(clean_repo), offline=False,
+                                mailto="me@example.org", transport=transport)
+    assert (v.verified, v.method, v.open_access) == (True, "crossref", OA_PDF)
+    assert any("api.unpaywall.org" in u and "email=me%40example.org" in u for u in transport.calls)
+
+
+def test_openalex_is_the_fallback_when_unpaywall_has_no_copy(clean_repo):
+    note = set_csl(clean_repo, DOI="10.1145/3477132.3483540")
+    transport = cassette(**{"api.crossref.org": CROSSREF_OK,
+                            "api.unpaywall.org": UNPAYWALL_CLOSED,
+                            "api.openalex.org": OPENALEX_OK})
+    v = verify_refs.verify_note(note, repo_of(clean_repo), offline=False,
+                                mailto="me@example.org", transport=transport)
+    assert v.open_access == OA_PDF
+    assert any("api.openalex.org" in u for u in transport.calls)
+
+
+def test_unpaywall_is_skipped_without_a_contact_email(clean_repo):
+    """Unpaywall requires an email; OpenAlex does not."""
+    note = set_csl(clean_repo, DOI="10.1145/3477132.3483540")
+    transport = cassette(**{"api.crossref.org": CROSSREF_OK, "api.openalex.org": OPENALEX_MISS})
+    v = verify_refs.verify_note(note, repo_of(clean_repo), offline=False,
+                                mailto="", transport=transport)
+    assert v.verified and v.open_access == ""
+    assert not any("unpaywall" in u for u in transport.calls)
+
+
+def test_an_unreachable_oa_registry_does_not_block_verification(clean_repo):
+    note = set_csl(clean_repo, DOI="10.1145/3477132.3483540")
+    v = verify_refs.verify_note(note, repo_of(clean_repo), offline=False,
+                                mailto="me@example.org",
+                                transport=cassette(**{"api.crossref.org": CROSSREF_OK}))
+    assert (v.verified, v.open_access) == (True, "")
+
+
+def test_open_access_url_is_persisted_and_survives_an_offline_recheck(clean_repo):
+    set_csl(clean_repo, DOI="10.1145/3477132.3483540")
+    verify_refs.run(repo_of(clean_repo), offline=False, mailto="me@example.org",
+                    transport=cassette(**{"api.crossref.org": CROSSREF_OK,
+                                          "api.unpaywall.org": UNPAYWALL_OK}), render=False)
+    saved = load(clean_repo, f"reference/{REF_KEY}.md")
+    assert saved.meta["verification"]["open_access"] == OA_PDF
+    # Offline, a lookup-only reference is unverified again (CI relies on
+    # captures), but the place to get the capture from must not be lost.
+    verify_refs.run(repo_of(clean_repo), offline=True, mailto="", render=False)
+    saved = load(clean_repo, f"reference/{REF_KEY}.md")
+    assert saved.meta["verification"]["verified"] is False
+    assert saved.meta["verification"]["open_access"] == OA_PDF
+
+
+def test_mailto_falls_back_to_config_fetch_mailto(clean_repo):
+    import yaml
+    cfg = yaml.safe_load((clean_repo / "config.yml").read_text())
+    cfg["fetch"]["mailto"] = "cfg@example.org"
+    (clean_repo / "config.yml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    result = run_script("verify_refs.py", clean_repo, "--offline")
+    assert result.returncode == 0
+    result = run_script("verify_refs.py", clean_repo)
+    assert "no --mailto given" not in result.stderr
 
 
 # --- write-only-on-change (issue #7, finding 3) --------------------------------

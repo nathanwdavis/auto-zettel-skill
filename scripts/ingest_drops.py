@@ -379,10 +379,9 @@ def ingest(repo: ContentRepo, *, mailto: str = "", offline: bool = False,
         # after the run remembers to call verify_refs in step 8.
         note = Note.load(repo.root / "reference" / f"{r['key']}.md")
         result = verify_refs.verify_note(note, repo, offline=True, mailto="")
-        ok, method, source = result[0], result[1], result[2]
-        note.meta["verification"] = {"method": method, "source": source,
-                                     "verified": bool(ok),
-                                     "date": verify_refs.now() if ok else ""}
+        note.meta["verification"] = {"method": result.method, "source": result.source,
+                                     "verified": result.verified,
+                                     "date": verify_refs.now() if result.verified else ""}
         verify_refs.rerender(note)
         note.save()
     if ingested:
