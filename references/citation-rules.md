@@ -96,6 +96,33 @@ like `11:18Z-11:19Z`. And a capture is never rewritten after the fact, an
 awkward header included: captures are immutable evidence, and the sandbox
 gate rejects any edit to `raw/`.
 
+### Where the copy comes from (amendment A11)
+
+Most capture failures are one of two things, and they have different fixes.
+
+- **Paywalls.** For a DOI, `verify_refs.py` also asks Unpaywall (when
+  `fetch.mailto` is set; it requires a contact email) and then OpenAlex for
+  a legal free copy, and records the URL as `verification.open_access`.
+  Both index only legitimately open copies — publisher OA, institutional
+  and preprint repositories — and deliberately exclude author-sharing sites.
+  The researcher captures that URL. When there is none, the researcher files
+  an INBOX "Source needed" entry and a human can drop the PDF (`capture.md`).
+- **JavaScript shells.** `scripts/fetch_source.py` writes captures: it names
+  the file from the reference note, refuses to overwrite, keeps the bytes
+  verbatim, and detects a page that came back with almost no visible text.
+  With `fetch.renderer: jina` the page is re-fetched through
+  `https://r.jina.ai/<url>`; with `firecrawl`, through Firecrawl's scrape API
+  (`FIRECRAWL_API_KEY` in the environment). The default is `none`, because
+  every rendered URL is sent to that third party — and then a shell is a
+  failure plus an INBOX entry, never a saved "source".
+- **Academia.edu and ResearchGate are leads, not sources.** Their copies are
+  author uploads of uncertain version and licence, their terms forbid tools
+  fetching them, and `fetch_source.py` refuses their hosts outright. Take the
+  citation, resolve the DOI, fetch the open-access copy.
+- **Size.** `lint_citations` fails a capture over `fetch.max_capture_mb`
+  (default 25; GitHub's hard limit is 100). A capture that large is a scan
+  that wants shrinking before it is committed.
+
 ### Crossref politeness
 
 Requests always send `mailto`, which routes them to Crossref's reserved polite
@@ -150,6 +177,7 @@ entry; `build_manifest.py` omits it from `.bib/refs.json`.
 | `duplicate-source` | Two reference notes describe one source (same DOI/ISBN/PMID/arXiv id/URL); both are named |
 | `missing-field` | A reference note lacks `source_tier`, `raw_capture`, or one of the four `verification` keys; a verified note with an empty `date`, or a `raw-capture` method with an empty `raw_capture` |
 | `bad-source-tier` | `source_tier` outside `peer-reviewed | primary-text | reputable-secondary | general-web` |
+| `capture-too-large` | `raw_capture` exceeds config `fetch.max_capture_mb` (A11) |
 
 And one **warning** (stderr, exit 0): `weak-sourcing`, a permanent note whose
 verified references are all `general-web`. A lead found on the open web is

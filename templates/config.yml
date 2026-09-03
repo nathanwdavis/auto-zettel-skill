@@ -36,3 +36,14 @@ skill_smith_cadence: "monthly"
 # this bounds trial spend. Optional: runs default to 3 when the key is absent,
 # so pre-Phase-4 content repos keep working without a config migration.
 trial_questions: 3
+
+# Source fetching (amendment A11). All optional; absent keys mean the defaults
+# shown, so older content repos keep working without a migration.
+fetch:
+  mailto: ""            # contact email sent to Crossref/Unpaywall/OpenAlex for the
+                        # polite pools (Unpaywall requires one; skipped without it)
+  renderer: none        # none | jina | firecrawl -- JavaScript rendering for
+                        # captures of pages that come back as an empty shell.
+                        # Opt-in: every rendered URL is sent to that third party.
+                        # firecrawl reads FIRECRAWL_API_KEY from the environment.
+  max_capture_mb: 25    # lint_citations fails a raw/ capture larger than this

@@ -33,6 +33,10 @@ Step 2. Read INBOX.md, then list the open questions in work order:
     {{PYTHON}} {{SCRIPTS}}/inquiries.py --repo {{REPO}} --status new
 Read the ones you plan to work. Entries marked `new` are your priorities.
 Human feedback is authoritative and overrides anything else in this prompt.
+Sources a human dropped into drop/ were already ingested by `start`: their
+INBOX entries ("Dropped source ready") name a reference note whose capture
+is in raw/. Work those first, from the capture (Read opens PDFs; the .txt
+beside it is the extraction), and never re-fetch them.
 
 Step 3. First list the child skills the knowledge base has grown:
     {{PYTHON}} {{SCRIPTS}}/skill_review.py --repo {{REPO}} list

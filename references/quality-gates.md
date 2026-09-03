@@ -12,7 +12,7 @@ of "make the gate pass".
 |---|---|---|
 | `verify_refs.py` | verification state per reference (records, exits 0; `--offline` checks raw/ captures only) | usage errors only — `lint_citations` is the gate that fails |
 | `build_manifest.py --check` | manifest.json is current and deterministic | drift between notes and index |
-| `lint_citations.py` | every sourced claim traces to a verified reference; Chicago strings current; reference-note field completeness, source-tier vocabulary, one note per source | ungrounded claims, unverified or malformed refs, duplicate sources |
+| `lint_citations.py` | every sourced claim traces to a verified reference; Chicago strings current; reference-note field completeness, source-tier vocabulary, one note per source, capture size cap | ungrounded claims, unverified or malformed refs, duplicate sources |
 | `lint_links.py` | link resolvability, FR-5 taxonomy, INDEX→MOC→note layering (both hops), 1-1-1 including the literature locator and `reference` field, key naming, inquiry lifecycle (AC-6) | broken/foreign links, malformed identity, empty MOCs, answered-with-nothing |
 | `lint_skills.py` | skill layer wellformedness: two-file units, PURPOSE provenance and status, no re-proposed rejected creates | malformed or uncited child skills (AC-34/AC-36) |
 | `check_skill_sandbox.py` | the cycle diff kept log.md and skill-impact.md append-only and raw/ immutable; `--strict` confines a smith diff to its sandbox | history rewrites, raw edits, sandbox escapes (AC-37) |

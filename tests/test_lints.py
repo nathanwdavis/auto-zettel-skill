@@ -165,6 +165,33 @@ def test_scripture_requires_the_primary_text_tier(broken_repo):
     assert "scripture-tier" in rules(result)
 
 
+def test_oversize_capture_fails(broken_repo):
+    """A11: fetch.max_capture_mb caps what a reference may cite."""
+    def mutate(repo):
+        import os
+        import yaml
+        cfg = yaml.safe_load((repo / "config.yml").read_text())
+        cfg["fetch"]["max_capture_mb"] = 1
+        (repo / "config.yml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
+        note = load(repo, f"reference/{REF_KEY}.md")
+        os.truncate(repo / note.meta["raw_capture"], 2 * 1024 * 1024)
+
+    result = run_script("lint_citations.py", broken_repo(mutate))
+    assert result.returncode != 0
+    assert "capture-too-large" in rules(result)
+
+
+def test_non_numeric_capture_cap_is_a_usage_error_not_a_crash(clean_repo):
+    import yaml
+    cfg = yaml.safe_load((clean_repo / "config.yml").read_text())
+    cfg["fetch"]["max_capture_mb"] = "big"
+    (clean_repo / "config.yml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    result = run_script("lint_citations.py", clean_repo)
+    assert result.returncode == 2
+    assert "fetch.max_capture_mb must be a number" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 def _clone_reference(repo, new_id: str):
     """A second reference note describing the fixture's source (same ISBN)."""
     note = load(repo, f"reference/{REF_KEY}.md")

@@ -255,6 +255,15 @@ print("yes" if ok else f"no\t{holder.holder}\t{holder.session}\t{holder.age_hour
            "subagents run their checked-in tier aliases ($MATERIALIZED)" >&2
     fi
 
+    # Dropped sources (amendment A11): ingest before the session plans, in
+    # the script rather than the prompt so every existing Routine gets it.
+    # Advisory like the two steps above; the ingest logs its own lines.
+    if INGESTED="$(PYTHONPATH="$SCRIPT_DIR" "$PYBIN" "$SCRIPT_DIR/ingest_drops.py" --repo "$REPO" 2>&1)"; then
+      [[ "$INGESTED" == "ingest_drops: nothing pending" ]] || echo "$INGESTED" >&2
+    else
+      echo "warning: ingest_drops failed; dropped sources stay in drop/ ($INGESTED)" >&2
+    fi
+
     log "remote_cycle: start (mode=B holder=$HOLDER session=$SESSION branch=$BRANCH skill-rev=$(skill_rev))"
     echo "$BRANCH"
     ;;

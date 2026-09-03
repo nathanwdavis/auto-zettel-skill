@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import PLUGIN_ROOT, build_clean_repo
+from conftest import PLUGIN_ROOT, build_clean_repo, drop_file, make_pdf
 
 MAINTENANCE = PLUGIN_ROOT / "scripts" / "maintenance_run.sh"
 STUB = PLUGIN_ROOT / "tests" / "stub_claude" / "claude"
@@ -234,6 +234,25 @@ def test_push_rejection_re_pulls_and_re_runs_every_merge_gate(repo_with_origin):
     # Every merge gate ran twice: once before the first push, once after the merge.
     for gate in ("lint_citations", "lint_links", "lint_skills"):
         assert log.count(f"{gate}: PASS") >= 2, f"{gate} did not re-run after the merge:\n{log}"
+
+
+def test_wrapper_ingests_dropped_sources_and_the_run_commits_them(repo_with_origin):
+    """A11 on the laptop path: the wrapper ingests before the headless run, and
+    the ingested artifacts are gate-clean, so the stub's commit pushes."""
+    repo, origin = repo_with_origin
+    drop_file(repo, "paper.pdf", make_pdf("A dropped paper"), sidecar={"title": "A dropped paper"})
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@localhost",
+                    "commit", "-qm", "drop"], check=True)
+
+    result = run_maintenance(repo)
+    assert result.returncode == 0, result.stderr
+    tree = subprocess.run(["git", "-C", str(origin), "ls-tree", "-r", "--name-only", "main"],
+                          capture_output=True, text=True, check=True).stdout
+    assert any(line.startswith("reference/a-dropped-paper--") for line in tree.splitlines())
+    assert any(line.startswith("raw/") and line.endswith(".pdf") for line in tree.splitlines())
+    assert "drop/paper.pdf" not in tree
+    assert "ingest_drops: drop/paper.pdf" in (repo / "log.md").read_text()
 
 
 def test_start_line_names_the_agents_handed_to_the_run(repo_with_origin):

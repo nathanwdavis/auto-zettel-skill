@@ -36,7 +36,7 @@ trap 'rm -rf "$WORK"' EXIT
 # --- 2. scripts respond to --help --------------------------------------------
 step "[2] script CLI contract"
 for s in build_manifest.py lint_citations.py lint_links.py verify_refs.py fetch_remote.py \
-         serendipity_sweep.py capture.py inquiries.py query.py lint_skills.py \
+         serendipity_sweep.py capture.py inquiries.py query.py ingest_drops.py fetch_source.py lint_skills.py \
          check_skill_sandbox.py skill_review.py skill_trial.py; do
   "$PY" "scripts/$s" --help >/dev/null 2>&1 || fail "scripts/$s --help"
   pass "scripts/$s --help"
@@ -226,6 +226,26 @@ LOG_BEFORE="$(sha256sum "$KB/log.md")"
   || fail "query.py --json"
 [[ "$(sha256sum "$KB/log.md")" == "$LOG_BEFORE" ]] || fail "query.py wrote to log.md"
 pass "query.py mapped existing coverage without writing anything (A10)"
+
+# A11: a PDF dropped into drop/ becomes a gate-clean reference + capture.
+"$PY" - "$KB" <<'DROPPY'
+import sys
+sys.path.insert(0, "tests"); sys.path.insert(0, "scripts")
+from pathlib import Path
+from conftest import drop_file, make_pdf
+drop_file(Path(sys.argv[1]), "smoke-paper.pdf", make_pdf("A smoke paper\nDropped by the smoke test."),
+          sidecar={"title": "A smoke paper", "author": "Smoke Tester", "year": 2026})
+DROPPY
+"$PY" scripts/ingest_drops.py --repo "$KB" | grep -q "^ingested" || fail "ingest_drops.py"
+ls "$KB"/reference/a-smoke-paper--*.md >/dev/null 2>&1 || fail "dropped source has no reference note"
+ls "$KB"/raw/*-a-smoke-paper.pdf >/dev/null 2>&1 || fail "dropped source not captured into raw/"
+[[ -z "$(ls "$KB/drop" | grep -v README.md | grep -v .gitkeep)" ]] || fail "drop/ not emptied"
+grep -q "Dropped source ready" "$KB/INBOX.md" || fail "no INBOX entry for the drop"
+for g in build_manifest.py lint_citations.py lint_links.py; do
+  args=(); [[ "$g" == build_manifest.py ]] && args=(--check)
+  "$PY" "scripts/$g" --repo "$KB" "${args[@]}" >/dev/null || fail "$g after drop ingest"
+done
+pass "a dropped PDF was ingested into a gate-clean reference and capture (A11)"
 
 # Ad-hoc research shares the lock with scheduled runs and never reaches main.
 AKB="$WORK/kb-adhoc"

@@ -113,7 +113,7 @@ mkdir -p "$DIR"
 DIR="$(cd "$DIR" && pwd)"
 cd "$DIR"
 
-for d in fleeting literature permanent reference moc inquiries raw skills proposed-links .bib; do
+for d in fleeting literature permanent reference moc inquiries raw drop skills proposed-links .bib; do
   mkdir -p "$d"
   cat > "$d/.gitkeep" <<'KEEP'
 KEEP
@@ -183,6 +183,40 @@ IMPACT
 
 printf '[]\n' > .bib/refs.json
 
+# The drop box (amendment A11): sources a human obtained, handed to the pipeline.
+cat > drop/README.md <<'DROP'
+# Drop box
+
+Put a source you want in the knowledge base here -- a PDF, or a `.txt`,
+`.md`, or `.html` capture -- and commit it (git, or GitHub's "Add file ->
+Upload files", which opens a PR that the gates check). The next maintenance
+cycle ingests everything in this directory before it plans its work:
+
+- the file moves to `raw/` as immutable evidence (plus a `.txt` extraction);
+- a reference note is written with CSL-JSON, identified from the optional
+  sidecar below, else from a DOI/arXiv id found in the text (enriched from
+  Crossref when it resolves);
+- an INBOX entry asks the run to write the literature and permanent notes.
+
+Optional sidecar, same stem as the file (`paper.pdf` -> `paper.yml`):
+
+```yaml
+title: "How to Take Smart Notes"
+author: ["Ahrens, Sönke"]      # "Family, Given" or "Given Family"; list or string
+year: 2017
+doi: ""                        # any of doi / isbn / arxiv / pmid / url
+isbn: "9781542866507"
+source_tier: reputable-secondary   # peer-reviewed | primary-text | reputable-secondary | general-web
+priority: normal               # low | normal | high -- for the INBOX entry
+notes: "Chapter 2 is the part that matters."
+```
+
+A drop that duplicates a reference already on file is renamed
+`<stem>.duplicate-of-<key>.pdf` and reported in INBOX; one over
+`fetch.max_capture_mb` (config.yml) is renamed `<stem>.too-large.pdf`.
+Nothing here is ever cited directly: only the copy in `raw/` is.
+DROP
+
 cat > .gitignore <<'IGNORE'
 run.lock
 .worktrees/
@@ -226,6 +260,7 @@ A citation-grounded Zettelkasten, cultivated by the
 | \`moc/\` | Maps of content. |
 | \`fleeting/\` | Short-lived captures, swept each cycle. |
 | \`raw/\` | Verbatim source captures. Immutable. |
+| \`drop/\` | Put a PDF here; the next run ingests it (see \`drop/README.md\`). |
 | \`inquiries/\` | Open questions and their answering notes. |
 | \`proposed-links/\` | Connector queue awaiting review. |
 | \`skills/\` | Self-authored child skills, pending human promotion. |

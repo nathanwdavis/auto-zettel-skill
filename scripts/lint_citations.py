@@ -8,6 +8,8 @@ Hard-fails the run (non-zero exit) on:
     four verification keys), carrying a source_tier outside the QA-3
     vocabulary, or marked scripture without the primary-text tier (AC-9);
   * two reference notes describing the same source (FR-4: exactly one per source);
+  * a raw capture larger than config fetch.max_capture_mb (A11; GitHub's own
+    limit is 100 MB, and a capture that big is a scan that wants shrinking);
   * any permanent-note sourced claim with no link to a verified reference (FR-11, QA-2);
   * any note tagged `contested` grounded in fewer than 3 distinct SOURCES (FR-12) --
     distinct by registry identifier, not by reference-note key, or three
@@ -31,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from zettel_lib import citations
 from zettel_lib.cli import EXIT_USAGE, Violation, base_parser, open_repo, report
 from zettel_lib.frontmatter import FrontmatterError, Note
-from zettel_lib.repo import ContentRepo, ContentRepoError
+from zettel_lib.repo import ContentRepo, ContentRepoError, max_capture_mb
 
 WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]")
 CONTESTED_MIN_SOURCES = 3
@@ -80,10 +82,14 @@ def lint(repo: ContentRepo) -> tuple[list[Violation], list[str]]:
         if n.type == "reference" and (n.meta.get("verification") or {}).get("verified") is True
     }
     available = set(citations.available_backends())
+    # A missing config.yml or a bad cap is a ContentRepoError, which main()
+    # reports as a usage error (exit 2) rather than a crash mid-gate.
+    max_mb = max_capture_mb(repo.config())
 
     references = [n for n in notes if n.type == "reference"]
     for note in references:
         violations.extend(_lint_reference(repo, note, available, warnings))
+        violations.extend(_lint_capture_size(repo, note, max_mb))
     violations.extend(_lint_duplicate_sources(repo, references))
 
     for note in (n for n in notes if n.type == "permanent"):
@@ -97,6 +103,21 @@ def _identity(note: Note) -> str:
     """What source a reference note describes; its own key when it cannot say."""
     csl = note.meta.get("csl_json")
     return citations.source_identity(csl if isinstance(csl, dict) else {}) or f"note:{note.key}"
+
+
+def _lint_capture_size(repo, note, max_mb: float) -> list[Violation]:
+    capture = str(note.meta.get("raw_capture") or "").strip()
+    if not capture:
+        return []
+    path = repo.root / capture
+    if not path.exists():
+        return []
+    size_mb = path.stat().st_size / (1024 * 1024)
+    if size_mb > max_mb:
+        return [Violation(repo.rel(note.path), "capture-too-large",
+                          f"raw capture {capture} is {size_mb:.1f} MB; fetch.max_capture_mb "
+                          f"is {max_mb:g}")]
+    return []
 
 
 def _lint_duplicate_sources(repo, references) -> list[Violation]:
