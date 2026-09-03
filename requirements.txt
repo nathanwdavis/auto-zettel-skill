@@ -4,6 +4,9 @@ PyYAML>=6.0            # note frontmatter and config.yml
 requests>=2.31         # metadata lookups in verify_refs.py
 networkx>=3.4          # Louvain communities in serendipity_sweep.py; the sweep
                        # degrades to connected components without it
+pypdf>=4.0             # text + metadata extraction for dropped PDFs
+                       # (ingest_drops.py); pure Python, and the ingest degrades
+                       # to sidecar/filename identity without it
 
 # Chicago rendering. pandoc is the PRIMARY backend: citeproc-py ignores the
 # bundled style's `initialize="false"` overrides and renders "L. Tang" where

@@ -55,7 +55,60 @@ CONFIG = {
     "connector_cadence": "weekly",
     "skill_smith_cadence": "monthly",
     "trial_questions": 3,
+    "fetch": {"mailto": "", "renderer": "none", "max_capture_mb": 25},
 }
+
+
+def make_pdf(text: str, title: str = "", author: str = "") -> bytes:
+    """A minimal, valid single-page PDF whose text pypdf can extract.
+
+    Hand-assembled rather than generated with a library so the fixture is
+    byte-stable and needs nothing beyond the standard library to build.
+    """
+    lines = text.splitlines() or [""]
+    ops = ["BT", "/F1 12 Tf", "72 720 Td", "14 TL"]
+    for line in lines:
+        esc = line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        ops.append(f"({esc}) Tj T*")
+    ops.append("ET")
+    stream = "\n".join(ops).encode("latin-1", "replace")
+    objs = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+         b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"),
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    if title or author:
+        objs.append(f"<< /Title ({title}) /Author ({author}) >>".encode("latin-1", "replace"))
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for i, obj in enumerate(objs, 1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n".encode() + obj + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objs) + 1}\n".encode() + b"0000000000 65535 f \n"
+    for off in offsets:
+        out += f"{off:010d} 00000 n \n".encode()
+    trailer = f"<< /Size {len(objs) + 1} /Root 1 0 R"
+    if title or author:
+        trailer += f" /Info {len(objs)} 0 R"
+    trailer += " >>"
+    out += f"trailer\n{trailer}\nstartxref\n{xref}\n%%EOF\n".encode()
+    return bytes(out)
+
+
+def drop_file(root: Path, name: str, data: bytes, sidecar: dict | None = None) -> Path:
+    """Put a source file (and optional sidecar) into the repo's drop/ box."""
+    drop = root / "drop"
+    drop.mkdir(exist_ok=True)
+    path = drop / name
+    path.write_bytes(data)
+    if sidecar is not None:
+        (drop / (Path(name).stem + ".yml")).write_text(
+            yaml.safe_dump(sidecar, sort_keys=False), encoding="utf-8")
+    return path
 
 
 def _write(path: Path, meta: dict, body: str) -> None:
@@ -65,7 +118,7 @@ def _write(path: Path, meta: dict, body: str) -> None:
 
 def build_clean_repo(root: Path) -> Path:
     """Create a minimal content repo that passes every lint."""
-    for d in ("fleeting", "literature", "permanent", "reference", "moc",
+    for d in ("fleeting", "literature", "permanent", "reference", "moc", "drop",
               "inquiries", "raw", "skills", "proposed-links", ".bib"):
         (root / d).mkdir(parents=True, exist_ok=True)
 

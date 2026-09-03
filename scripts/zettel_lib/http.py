@@ -21,13 +21,24 @@ class Response:
     status: int
     body: str
     headers: dict[str, str]
+    #: The raw bytes, for captures (a PDF is not text). ``None`` from
+    #: transports and cassettes that only ever carried text.
+    content: bytes | None = None
 
     def json(self):
         return json.loads(self.body)
 
+    @property
+    def data(self) -> bytes:
+        return self.content if self.content is not None else self.body.encode("utf-8")
+
 
 class Transport(Protocol):
     def __call__(self, url: str, headers: dict[str, str]) -> Response: ...
+
+
+class PostTransport(Protocol):
+    def __call__(self, url: str, headers: dict[str, str], body: dict) -> Response: ...
 
 
 class NetworkUnavailable(RuntimeError):
@@ -41,7 +52,18 @@ def requests_transport(url: str, headers: dict[str, str]) -> Response:
         resp = requests.get(url, headers=headers, timeout=DEFAULT_TIMEOUT)
     except Exception as exc:  # noqa: BLE001 - any transport error degrades alike
         raise NetworkUnavailable(str(exc)) from exc
-    return Response(resp.status_code, resp.text, dict(resp.headers))
+    return Response(resp.status_code, resp.text, dict(resp.headers), resp.content)
+
+
+def requests_post_transport(url: str, headers: dict[str, str], body: dict) -> Response:
+    """JSON POST, for the one API that needs it (Firecrawl's scrape endpoint)."""
+    import requests  # lazy, as above
+
+    try:
+        resp = requests.post(url, headers=headers, json=body, timeout=DEFAULT_TIMEOUT * 3)
+    except Exception as exc:  # noqa: BLE001
+        raise NetworkUnavailable(str(exc)) from exc
+    return Response(resp.status_code, resp.text, dict(resp.headers), resp.content)
 
 
 class CassetteTransport:
@@ -50,9 +72,12 @@ class CassetteTransport:
     def __init__(self, cassettes: dict[str, Response]):
         self.cassettes = cassettes
         self.calls: list[str] = []
+        self.bodies: list[dict] = []  # JSON bodies seen when used as a PostTransport
 
-    def __call__(self, url: str, headers: dict[str, str]) -> Response:
+    def __call__(self, url: str, headers: dict[str, str], body: dict | None = None) -> Response:
         self.calls.append(url)
+        if body is not None:
+            self.bodies.append(body)
         for fragment, response in self.cassettes.items():
             if fragment in url:
                 return response
@@ -88,3 +113,22 @@ def get_json(
             continue
         return None
     return None
+
+
+def post_json(
+    url: str,
+    body: dict,
+    *,
+    headers: dict[str, str] | None = None,
+    transport: PostTransport = requests_post_transport,
+) -> dict | None:
+    """POST JSON, returning the parsed JSON reply or ``None`` on a non-200."""
+    merged = {"User-Agent": "zettel-bootstrap/0.1", "Accept": "application/json",
+              "Content-Type": "application/json", **(headers or {})}
+    resp = transport(url, merged, body)
+    if resp.status != 200:
+        return None
+    try:
+        return resp.json()
+    except json.JSONDecodeError:
+        return None
