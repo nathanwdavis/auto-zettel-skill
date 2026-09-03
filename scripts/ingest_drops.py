@@ -49,7 +49,7 @@ import verify_refs
 from zettel_lib import citations, http, naming
 from zettel_lib.cli import EXIT_OK, EXIT_USAGE, EXIT_VIOLATION, base_parser, open_repo
 from zettel_lib.frontmatter import FrontmatterError, Note, dump
-from zettel_lib.repo import ContentRepo, ContentRepoError, dig
+from zettel_lib.repo import ContentRepo, ContentRepoError, dig, max_capture_mb
 
 DROP_DIR = "drop"
 SOURCE_EXTS = (".pdf", ".txt", ".md", ".html", ".htm")
@@ -59,7 +59,6 @@ DOI_RE = re.compile(r"\b(10\.\d{4,9}/[^\s\"<>)\]]+)", re.IGNORECASE)
 ARXIV_RE = re.compile(r"arxiv:\s*(\d{4}\.\d{4,5}(?:v\d+)?)", re.IGNORECASE)
 CROSSREF = "https://api.crossref.org/works/{doi}?mailto={mailto}"
 PAGES_TO_READ = 5
-DEFAULT_MAX_MB = 25
 JOURNAL_TYPES = {"journal-article", "proceedings-article", "book-chapter", "book", "monograph"}
 
 
@@ -322,18 +321,19 @@ def ingest_one(repo: ContentRepo, path: Path, *, mailto: str, offline: bool,
     # The capture: the file itself, moved (raw/ is additions-only, and drop/
     # is outside it), plus the extraction so agents and query.py can grep it.
     slug = meta["slug"]
+    ext = path.suffix.lower()  # ".pdf"
     raw_dir = repo.root / "raw"
     raw_dir.mkdir(exist_ok=True)
-    capture_path = raw_dir / f"{note_id}-{slug}{path.suffix.lower()}"
+    capture_path = raw_dir / f"{note_id}-{slug}{ext}"
     if capture_path.exists():
         raise ContentRepoError(f"refusing to overwrite existing capture {repo.rel(capture_path)}")
     shutil.move(str(path), str(capture_path))
     text_path = None
-    if text.strip() and path.suffix.lower() != ".txt":
+    if text.strip() and ext != ".txt":
         text_path = raw_dir / f"{note_id}-{slug}.txt"
         text_path.write_text(
             f"Text extraction of {capture_path.name} (dropped as {path.name}); "
-            f"the {path.suffix.lower()[1:]} is the cited capture.\n\n{text}",
+            f"the {ext.lstrip('.')} file is the cited capture.\n\n{text}",
             encoding="utf-8")
     side = sidecar_path(path)
     if side.exists():
@@ -365,7 +365,7 @@ def ingest_one(repo: ContentRepo, path: Path, *, mailto: str, offline: bool,
 def ingest(repo: ContentRepo, *, mailto: str = "", offline: bool = False,
            transport=http.requests_transport) -> list[dict]:
     cfg = repo.config()
-    max_mb = float(dig(cfg, "fetch.max_capture_mb") or DEFAULT_MAX_MB)
+    max_mb = max_capture_mb(cfg)
     mailto = mailto or str(dig(cfg, "fetch.mailto") or "")
     identities = existing_identities(repo)
     results = []

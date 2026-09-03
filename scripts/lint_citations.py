@@ -33,9 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from zettel_lib import citations
 from zettel_lib.cli import EXIT_USAGE, Violation, base_parser, open_repo, report
 from zettel_lib.frontmatter import FrontmatterError, Note
-from zettel_lib.repo import ContentRepo, ContentRepoError, dig
-
-DEFAULT_MAX_CAPTURE_MB = 25
+from zettel_lib.repo import ContentRepo, ContentRepoError, max_capture_mb
 
 WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]")
 CONTESTED_MIN_SOURCES = 3
@@ -84,10 +82,9 @@ def lint(repo: ContentRepo) -> tuple[list[Violation], list[str]]:
         if n.type == "reference" and (n.meta.get("verification") or {}).get("verified") is True
     }
     available = set(citations.available_backends())
-    try:
-        max_mb = float(dig(repo.config(), "fetch.max_capture_mb") or DEFAULT_MAX_CAPTURE_MB)
-    except ContentRepoError:
-        max_mb = DEFAULT_MAX_CAPTURE_MB
+    # A missing config.yml or a bad cap is a ContentRepoError, which main()
+    # reports as a usage error (exit 2) rather than a crash mid-gate.
+    max_mb = max_capture_mb(repo.config())
 
     references = [n for n in notes if n.type == "reference"]
     for note in references:

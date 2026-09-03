@@ -181,6 +181,17 @@ def test_oversize_capture_fails(broken_repo):
     assert "capture-too-large" in rules(result)
 
 
+def test_non_numeric_capture_cap_is_a_usage_error_not_a_crash(clean_repo):
+    import yaml
+    cfg = yaml.safe_load((clean_repo / "config.yml").read_text())
+    cfg["fetch"]["max_capture_mb"] = "big"
+    (clean_repo / "config.yml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    result = run_script("lint_citations.py", clean_repo)
+    assert result.returncode == 2
+    assert "fetch.max_capture_mb must be a number" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 def _clone_reference(repo, new_id: str):
     """A second reference note describing the fixture's source (same ISBN)."""
     note = load(repo, f"reference/{REF_KEY}.md")

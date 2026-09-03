@@ -119,6 +119,28 @@ class ContentRepo:
         return out
 
 
+DEFAULT_MAX_CAPTURE_MB = 25.0
+
+
+def max_capture_mb(cfg: dict) -> float:
+    """config fetch.max_capture_mb as a number, defaulting when absent (A11).
+
+    A non-numeric value is a configuration error and says so, rather than a
+    ValueError from inside a gate.
+    """
+    raw = dig(cfg, "fetch.max_capture_mb")
+    if raw is None or raw == "":
+        return DEFAULT_MAX_CAPTURE_MB
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        raise ContentRepoError(
+            f"config.yml fetch.max_capture_mb must be a number, got {raw!r}") from None
+    if value <= 0:
+        raise ContentRepoError(f"config.yml fetch.max_capture_mb must be positive, got {raw!r}")
+    return value
+
+
 def dig(data: dict, dotted: str):
     cur = data
     for part in dotted.split("."):
