@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from conftest import PLUGIN_ROOT, build_clean_repo
+from conftest import drop_file, make_pdf
 from zettel_lib import gitlock
 
 SCRIPT = PLUGIN_ROOT / "scripts" / "remote_cycle.sh"
@@ -147,6 +148,26 @@ def test_start_hard_fails_on_a_missing_config_key_before_claiming(content_repo):
     assert result.stdout.strip() == ""
     assert "zettel/lock" not in branches_on(origin)
     assert current_branch(repo) == "main"
+
+
+def test_start_ingests_dropped_sources_before_the_session_plans(content_repo):
+    """A11: a PDF committed into drop/ becomes a reference + capture on the run
+    branch with no prompt involvement, so every existing Routine gets it."""
+    repo, _ = content_repo
+    drop_file(repo, "paper.pdf", make_pdf("A dropped paper\nWith one line of text."),
+              sidecar={"title": "A dropped paper", "author": "Ada Lovelace", "year": 1843})
+    git = ["git", "-C", str(repo)]
+    subprocess.run(git + ["add", "-A"], check=True)
+    subprocess.run(git + ["commit", "-qm", "drop a paper"], check=True)
+
+    result = cycle(repo, "start")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().startswith("zettel/run-") and "\n" not in result.stdout.strip()
+    assert "ingested" in result.stderr
+    refs = [p.name for p in (repo / "reference").glob("a-dropped-paper--*.md")]
+    assert len(refs) == 1
+    assert not (repo / "drop" / "paper.pdf").exists()
+    assert "ingest_drops: drop/paper.pdf -> reference/" in (repo / "log.md").read_text()
 
 
 def test_start_logs_the_mode(content_repo):

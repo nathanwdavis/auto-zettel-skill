@@ -19,7 +19,7 @@ EXPECTED_FILES = {
 }
 EXPECTED_DIRS = {
     "fleeting", "literature", "permanent", "reference", "moc",
-    "inquiries", "raw", "skills", "proposed-links", ".bib",
+    "inquiries", "raw", "drop", "skills", "proposed-links", ".bib",
 }
 
 

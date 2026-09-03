@@ -121,6 +121,15 @@ AGENT_NAMES="$(PYTHONPATH="$SCRIPT_DIR" "$PYBIN" -m zettel_lib.agents --repo "$R
 log "maintenance_run: start (mode=A dry_run=${DRY_RUN} agents=${AGENT_NAMES})"
 log "maintenance_run: step 1 lock acquired, pulled, HEAD=${PRE_HEAD:0:9}"
 
+# --- step 2a: dropped sources (amendment A11) ---------------------------------
+# Deterministic and model-free, so the wrapper does it; the headless run then
+# finds the reference notes and INBOX entries already in place and commits them.
+if INGESTED="$(PYTHONPATH="$SCRIPT_DIR" "$PYBIN" "$SCRIPT_DIR/ingest_drops.py" --repo "$REPO" 2>&1)"; then
+  [[ "$INGESTED" == "ingest_drops: nothing pending" ]] || echo "$INGESTED" >&2
+else
+  log "maintenance_run: WARNING ingest_drops failed; drops left in place ($INGESTED)"
+fi
+
 # --- steps 2-10: the headless run (FR-25) -------------------------------------
 RESULTS_DIR="${RESULTS_DIR:-$REPO/../$(basename "$REPO")-runs}"
 mkdir -p "$RESULTS_DIR"
