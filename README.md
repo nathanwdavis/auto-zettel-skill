@@ -95,6 +95,29 @@ An **inquiry** is an open question tracked across runs
 `lint_links.py` refuses to let an inquiry be marked `answered` without a
 `result_notes` backlink to the permanent note that answered it.
 
+### Drop a source you obtained yourself
+
+```sh
+cp ~/Downloads/paper.pdf <content-repo>/drop/      # optional: paper.yml beside it
+git -C <content-repo> add drop && git -C <content-repo> commit -m "drop: paper"
+scripts/ingest_drops.py --repo <content-repo>       # or wait for the next cycle
+```
+
+Paywalled papers, PDFs an author sent, pages no fetcher renders: put the
+file in `drop/` (GitHub's "Upload files" works too; it opens a PR). Every
+cycle ingests what is there before planning — the file moves to `raw/` as
+immutable evidence with a text extraction beside it, a reference note is
+written from the optional sidecar or a DOI found in the text (enriched from
+Crossref), verified on the capture, and an INBOX entry asks the run to write
+the notes. Duplicates and oversize files are marked in place and reported.
+Details: [`references/capture.md`](references/capture.md).
+
+For sources the agents fetch themselves, `scripts/fetch_source.py` names and
+writes the capture, `verify_refs.py` records a legal open-access copy for any
+DOI (Unpaywall/OpenAlex), and an opt-in `fetch.renderer` (Jina or Firecrawl)
+handles JavaScript-only pages. See
+[`references/citation-rules.md`](references/citation-rules.md).
+
 ### Query — what does the base already know?
 
 ```sh
@@ -237,7 +260,7 @@ skills/zettel-bootstrap/     SKILL.md (entry point)
 references/                  architecture, note types, citation rules
 templates/                   note, config, and child-skill templates
 agents/                      the 8 subagent definitions
-scripts/                     genesis, capture, query, maintenance, manifest, verification, lints
+scripts/                     genesis, capture, drop ingest, fetch, query, maintenance, manifest, verification, lints
   zettel_lib/                shared library (see note below)
   csl/                       bundled Chicago style + provenance
 ci/                          content-repo gate workflow + cloud env setup
@@ -250,7 +273,7 @@ PLAN.md                      phase status and build order
 `scripts/zettel_lib/` is an addition to the layout the spec prescribes: the
 Python entry points share frontmatter parsing, note naming, repo access, HTTP,
 citation rendering, similarity scoring, and the git lock, and duplicating those
-across eighteen entry points would guarantee they drift.
+across twenty entry points would guarantee they drift.
 
 ## Working on the skill itself
 
@@ -265,7 +288,7 @@ pip install -r requirements-dev.txt
 ./smoke_test.sh
 ```
 
-`smoke_test.sh` runs the full pytest suite (393 tests) plus an end-to-end
+`smoke_test.sh` runs the full pytest suite (421 tests) plus an end-to-end
 genesis scaffold. To run pytest alone, use the virtualenv's interpreter —
 `pytest` is generally not installed in the system python:
 

@@ -17,7 +17,7 @@ variables. `.gitignore` covers `.env`, `*.token`, `*.pem`, `.netrc`, `run.lock`.
 ## Running things
 
 ```sh
-.venv/bin/python -m pytest -q      # 393 tests, ~160s
+.venv/bin/python -m pytest -q      # 421 tests, ~160s
 ./smoke_test.sh                    # pytest + end-to-end scaffold; exit 0 or it isn't done
 claude plugin validate --strict .
 ```
@@ -114,7 +114,7 @@ tidy document. `PLAN.md` tracks phase status and the build order.
   the model — it explains the failure mode that justifies the tool's existence.
 - **Shared logic goes in `scripts/zettel_lib/`**, never duplicated across entry
   points. Frontmatter, naming, repo access, HTTP, citations, similarity, and
-  the git lock all live there precisely so the eighteen entry points cannot drift.
+  the git lock all live there precisely so the twenty entry points cannot drift.
 - **`--allowedTools` must be one quoted comma-separated argument.** Split
   across shell words, space-containing patterns like `Bash(git add:*)` shatter
   and silently deny commits mid-run. `tests/stub_claude` asserts this.

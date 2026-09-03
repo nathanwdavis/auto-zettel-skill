@@ -18,7 +18,11 @@ entries marked `new`, then `in-progress`.
 ## Your cycle (the parts you own)
 
 1. Read INBOX, then `inquiries.py --repo <repo> --status new` for the open
-   questions in work order; read the ones you plan to work.
+   questions in work order; read the ones you plan to work. INBOX entries
+   titled "Dropped source ready" come first: a human handed the pipeline a
+   source, its capture and reference note already exist, and the stream is
+   "literature note from an existing capture, then synthesis" — cheaper than
+   any research, and never re-fetched.
 2. Read `config.yml` (`topics`, cadences, budget) and `log.md`'s recent
    entries to see what the last runs did.
 3. Plan the run: which inquiries to answer, which topics have gaps, what

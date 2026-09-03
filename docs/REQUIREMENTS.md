@@ -281,6 +281,32 @@ explicit opt-in that captures them (an operation, logged as one), so a
 person reading the report in a remote session can say "file those". Mode A
 only; Mode B degrades to manifest metadata by hand.
 
+### A11 — Sources the pipeline could not reach (2026-09-02, FR-1, FR-2, FR-10, FR-22, FR-29, §7)
+
+Live runs failed on the same two things: pages behind JavaScript and papers
+behind paywalls, neither of which FR-10's registries or `web_fetch` can
+capture. Four additions, none of which weakens a gate:
+
+- **FR-1:** the content-repo tree gains `drop/` (with a README), where a
+  human commits a source they obtained. `scripts/ingest_drops.py` runs at the
+  start of every cycle from the scripts (not the prompts): the file moves to
+  `raw/` as the capture, a reference note is generated from an optional
+  sidecar or an identifier found in the text (Crossref-enriched), verified
+  on the capture (FR-10 (a)) and rendered, and an INBOX entry directs the
+  run. Duplicates and oversize drops are renamed in place and reported.
+- **FR-2:** an optional `fetch:` block — `mailto` (the standing contact
+  address for the polite pools; `--mailto` still overrides), `renderer`
+  (`none | jina | firecrawl`, default `none`), `max_capture_mb` (default 25).
+- **FR-10/FR-22:** for a DOI, `verify_refs.py` also resolves a legal
+  open-access copy through Unpaywall and OpenAlex and records it as
+  `verification.open_access`. Enrichment, not verification: it never
+  changes `verified`, and an unreachable OA registry does not block Crossref.
+- **§7 / FR-29:** `scripts/fetch_source.py` is the researcher's capture tool
+  (deterministic naming, immutability, verbatim bytes, shell detection, the
+  opt-in renderer). Academia.edu and ResearchGate are refused as sources.
+  `lint_citations` gains `capture-too-large`. `pypdf` joins the runtime
+  dependencies; the ingest degrades to sidecar/filename identity without it.
+
 -----
 
 ## TL;DR

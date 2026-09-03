@@ -41,6 +41,7 @@ reference/        bibliographic records, one per source
 moc/              maps of content
 fleeting/         short-lived captures, swept each cycle
 raw/              verbatim source captures (immutable)
+drop/             sources a human hands to the pipeline; ingested each cycle
 inquiries/        open questions and their answering notes
 proposed-links/   connector queue awaiting review
 skills/           self-authored child skills, pending promotion

@@ -82,6 +82,20 @@ An **inquiry** is an open question, tracked across runs (`new` → `in-progress`
 note — the lint enforces it. Closing a question with nothing to point at is how
 a knowledge base quietly stops answering anything.
 
+### Dropping a source you obtained yourself
+
+A paper behind a paywall, a PDF an author sent, a page the fetcher cannot
+render: put the file in the content repo's `drop/` directory and commit it
+(git, a session, or GitHub's "Upload files", which opens a PR the gates
+check). Optionally add `<stem>.yml` beside it with `title`, `author`, `year`,
+`doi`/`isbn`/`arxiv`/`url`, `source_tier`, `priority`, `notes` — see
+`drop/README.md` for the shape. The next cycle ingests it before planning:
+the file moves to `raw/` as immutable evidence, a reference note is written
+(identified from the sidecar, else a DOI found in the text, enriched from
+Crossref), and an INBOX entry asks the run to write the notes. In a session
+you can run it now: `scripts/ingest_drops.py --repo <repo>`. Never cite a
+file still in `drop/`.
+
 ## Mapping existing knowledge
 
 "What do we have on X?" is a different request from "find out about X".
@@ -161,9 +175,14 @@ open questions are work the user has already asked for.
 
 For each source:
 
-1. **Capture** the source verbatim into `raw/`. This is what makes it
-   verifiable. Never write a reference note for something you did not fetch or
-   cannot look up authoritatively.
+1. **Capture** the source verbatim into `raw/` with
+   `scripts/fetch_source.py --repo <repo> --ref <key> --url <url>` (after the
+   reference note exists). This is what makes it verifiable. Prefer the
+   `verification.open_access` URL `verify_refs.py` records for a DOI; a
+   JavaScript shell needs `fetch.renderer` in config.yml or a human-dropped
+   PDF; Academia.edu and ResearchGate are leads, never sources. Never write a
+   reference note for something you did not fetch or cannot look up
+   authoritatively.
 2. **Reference note** (`reference/`) — one per source, from
    `templates/reference.md`. Fill `csl_json`; leave the Chicago strings empty
    and let `verify_refs.py` render them. Never hand-write them.

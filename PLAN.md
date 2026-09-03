@@ -1,6 +1,6 @@
 # Build Plan — `zettel-bootstrap` Claude Code Skill
 
-**Source of truth:** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (all FR-x / AC-x / NFR-x / QA-x / checklist references below point there). Deviations forced by implementation are recorded there as numbered amendments — **A1–A10** so far.
+**Source of truth:** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (all FR-x / AC-x / NFR-x / QA-x / checklist references below point there). Deviations forced by implementation are recorded there as numbered amendments — **A1–A11** so far.
 **Working on this repo:** [`.claude/CLAUDE.md`](.claude/CLAUDE.md) — how to run the suite, the environment's sharp edges, and the conventions.
 **This repo:** the skill repo. It contains ONLY the `zettel-bootstrap` plugin — never zettelkasten content. The content repo is created at genesis runtime by `init_content_repo.sh` and is out of scope for this repo's file tree. Both repos are public (A4); nothing here may contain a secret (NFR-4).
 **Status:** All phases complete — 1, 2, 3, 3.5, 3.6 (PR #5), 4 (PR #6) — plus two rounds of field fixes from live scheduled runs: issue #7 → PR #8 (amendment A8), and the stale-install/frozen-prompt round → PR #10. Every §12 checklist item passes. What remains is operational, not code: see **Handoff — next steps** at the end of §2.
@@ -14,7 +14,7 @@ The plugin is laid out at the repo root (only `plugin.json` lives inside `.claud
 ```
 .claude-plugin/plugin.json          # name (required), version, description, author, repository (string URL)
 .claude-plugin/marketplace.json     # makes `/plugin marketplace add` work (FR-17)
-skills/zettel-bootstrap/SKILL.md    # six portable frontmatter fields only; body <500 lines (currently 337)
+skills/zettel-bootstrap/SKILL.md    # six portable frontmatter fields only; body <500 lines (currently 356)
 agents/                             # 8 subagent definitions (.md + YAML frontmatter)
   orchestrator.md researcher.md synthesizer.md critic.md
   librarian.md connector.md note-maintainer.md skill-smith.md
@@ -29,6 +29,7 @@ scripts/
   init_content_repo.sh              # genesis (FR-18); --no-remote for local
   capture.py inquiries.py           # human/agent input + the FR-6 inquiry reporter
   query.py                          # read-only: what the base already knows about X (A10)
+  ingest_drops.py fetch_source.py   # human-dropped sources; mechanical captures + renderer (A11)
   adhoc_research.sh                 # "answer this now", through the scheduled path
   maintenance_run.sh                # laptop path: wraps a nested `claude -p`
   remote_cycle.sh                   # remote path: start|finish|abort|status|refresh-skill
@@ -322,9 +323,38 @@ chat. Mode A only; the Mode-B metadata fallback is prose in SKILL.md and
 A9); unknown terms surface as a gap with the suggested command; connected
 notes stay within one hop; the MOC gap names the unreachable keys.
 
+### Post-Phase-4 round 7 — sources the pipeline could not reach  ✅ shipped
+*Amendment A11. Exit gate: a PDF committed into `drop/` is cited by the next cycle; a paywalled DOI resolves to its open-access copy; a JavaScript shell is never saved as a source.*
+
+Live runs kept failing on the same two things: pages behind JavaScript and
+papers behind paywalls. Four pieces, all script-driven so existing Routines
+get them:
+
+1. **`drop/` + `scripts/ingest_drops.py`.** A human commits a PDF (or a
+   text/HTML capture); `start` and the wrapper ingest it before planning:
+   moved to `raw/` with a pypdf text extraction, a reference note from the
+   optional sidecar or an extracted DOI (Crossref-enriched), verified on the
+   capture and rendered at once, an INBOX entry the orchestrator works first.
+   Duplicates (`citations.source_identity`) and oversize drops are renamed in
+   place and reported, never ingested twice or lost.
+2. **Open access in `verify_refs.py`.** Unpaywall (needs `fetch.mailto`) then
+   OpenAlex; the URL lands in `verification.open_access` and survives offline
+   re-checks until a capture exists. `verify_note` returns a dataclass.
+3. **`scripts/fetch_source.py`.** Mechanical captures: named from the note,
+   never overwritten, bytes verbatim; shell detection with the opt-in
+   `fetch.renderer` (jina / firecrawl); Academia.edu and ResearchGate refused
+   as leads; failure files an INBOX "Source needed" hand-off.
+4. **`capture-too-large`** in `lint_citations` against `fetch.max_capture_mb`.
+
+**Tests to keep**: the hand-built PDF fixture (`conftest.make_pdf`) and the
+ingest matrix (sidecar / DOI-in-text / no identifier / duplicate / oversize /
+no pypdf / sandbox gate on the move); `start` and the wrapper ingest a drop;
+OA lookup is enrichment (an unreachable OA registry never blocks Crossref);
+a shell with `renderer: none` is never saved.
+
 ### Handoff — next steps (operational, not code)
 
-The plugin code is done and green (393 tests, smoke exit 0, strict validate).
+The plugin code is done and green (421 tests, smoke exit 0, strict validate).
 What remains happens in the *environment* and the *content repo*, not here.
 
 **Done** (2026-09-01): the content repo's GitHub settings are now set —
@@ -381,7 +411,7 @@ agent holds the lock and is already mid-merge.
 
 ## 3. Testing & definition of done
 
-The §12 checklist is the definition of done, run before final commit of each phase and in full before v1. `smoke_test.sh` orchestrates every item that works without network or `gh`; the pytest suite currently stands at **393 tests**.
+The §12 checklist is the definition of done, run before final commit of each phase and in full before v1. `smoke_test.sh` orchestrates every item that works without network or `gh`; the pytest suite currently stands at **421 tests**.
 
 Fixtures are **built programmatically** in `tests/conftest.py`, not checked in as static files, so every violation fixture is provably "the clean repo with exactly one thing broken" and the reference note's Chicago strings stay self-consistent with its CSL-JSON.
 

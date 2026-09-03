@@ -26,7 +26,9 @@ verification:
   source: ""
   verified: false
   date: ""
-raw_capture: ""       # repo-relative path under raw/
+  # verify_refs.py may add open_access: <url> for a DOI -- the legal free
+  # copy to capture (Unpaywall/OpenAlex, amendment A11)
+raw_capture: ""       # repo-relative path under raw/ (fetch_source.py or ingest_drops.py write it)
 links: []
 created: "{{DATE}}"
 updated: "{{DATE}}"

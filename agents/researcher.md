@@ -22,16 +22,47 @@ are immutable evidence, whatever is awkward about them.
 
 ## Per source
 
-1. Fetch the source; save the verbatim content to `raw/`.
-2. Create the reference note from `templates/reference.md`: fill `csl_json`
-   completely (real authors, real dates, identifiers when they exist), set
-   `raw_capture` to the capture path, set `source_tier` honestly
+1. Create the reference note from `templates/reference.md`: fill `csl_json`
+   completely (real authors, real dates, identifiers when they exist), leave
+   `raw_capture` empty for now, set `source_tier` honestly
    (`peer-reviewed` > `primary-text` > `reputable-secondary` > `general-web`).
    Leave `chicago_note`/`chicago_bib` empty — `verify_refs.py` renders them.
+2. Capture with `scripts/fetch_source.py --repo <repo> --ref <key> --url <url>`.
+   It names the file `raw/<id>-<slug>.<ext>`, writes the bytes verbatim,
+   refuses to overwrite, and sets `raw_capture` in the note. Never fetch with
+   WebFetch and Write the capture by hand.
 3. Create the literature note from `templates/literature.md`: your own words,
    exactly this one source, with a locator (page/section/timestamp). Never
    paste source prose into a note — verbatim text lives only in `raw/`.
 4. Quick findings that are not yet note-worthy go in `fleeting/` notes.
+
+## Where the copy comes from
+
+- **Open access first.** After `verify_refs.py` runs, a reference with a DOI
+  may carry `verification.open_access`: the URL of a legal free copy found
+  through Unpaywall or OpenAlex. Fetch that, not the publisher page.
+- **JavaScript shells.** `fetch_source.py` detects a page that came back
+  empty. If `fetch.renderer` is set in config.yml it re-fetches rendered;
+  if not, it fails and files an INBOX "Source needed" entry for you. Do not
+  try to work around it with WebFetch: a shell is not a source.
+- **Academia.edu and ResearchGate are leads, never sources.** Their copies
+  are of uncertain version and licence and their terms forbid tool access;
+  `fetch_source.py` refuses them. Take the title, resolve the DOI, use the
+  open-access copy; if none exists, file the INBOX entry and move on.
+- **Paywalled and unreachable.** Say so: `scripts/capture.py --repo <repo>
+  inbox "Source needed: <title or DOI>" --body "<why it could not be
+  fetched>"`. A human can drop the PDF into `drop/` and the next cycle
+  ingests it. Never substitute a summary from memory.
+
+## Working from a dropped source
+
+An INBOX entry "Dropped source ready: …" names a reference note whose
+capture is already in `raw/` (a `.pdf`, with a `.txt` extraction beside it
+when one was possible). Read the capture (Read opens PDFs), write the
+literature note with a locator, and hand the literature note to the
+synthesizer as usual. Never re-fetch it, never edit its reference note's
+`csl_json` unless the capture proves it wrong, and never cite anything
+still sitting in `drop/`.
 
 ## Naming
 
@@ -53,7 +84,7 @@ and do not cite it as a source without saying what it attempted.
 
 ## Hard rails
 
-- Never edit or delete anything already in `raw/`.
+- Never edit or delete anything already in `raw/`; never cite a file in `drop/`.
 - Never write outside the worktree you were given.
 - Never touch reference notes' rendered Chicago strings.
 - No source you could not actually access. If a fetch fails, say so; do not

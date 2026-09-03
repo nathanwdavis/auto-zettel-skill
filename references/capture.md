@@ -103,6 +103,38 @@ touches and leave the base no larger, and the status field would report health
 it does not have. The second rule is why answers must be *permanent* notes: a
 literature note summarises a source, it does not assert an answer.
 
+## Dropping a source (amendment A11)
+
+The fourth route in, for sources the pipeline cannot fetch itself: a
+paywalled paper you have access to, a PDF an author sent, a page no renderer
+gets through. Commit the file into `drop/` — from a clone, from a session,
+or with GitHub's "Add file → Upload files", which opens a PR because `main`
+is protected. `scripts/ingest_drops.py` runs at the start of every cycle
+(from `remote_cycle.sh start` and `maintenance_run.sh`, not from the prompt,
+so existing Routines get it) and, per file:
+
+1. moves it to `raw/<id>-<slug>.<ext>` — immutable evidence, exactly like a
+   fetched capture — and writes `raw/<id>-<slug>.txt` with the text pypdf
+   extracts (first five pages), so agents and `query.py` can grep it;
+2. writes `reference/<key>.md` with CSL-JSON: from the optional sidecar
+   `<stem>.yml` (`title, author, year, doi, isbn, arxiv, pmid, url,
+   source_tier, priority, notes, tags`), else from a DOI or arXiv id found in
+   the text and the PDF's own metadata, enriched from Crossref when the DOI
+   resolves; the tier defaults to `peer-reviewed` for a DOI and
+   `reputable-secondary` otherwise; `provenance` records the original name;
+3. verifies it on the capture and renders the Chicago strings immediately,
+   so the artifact is gate-clean by construction;
+4. files an INBOX entry — "Dropped source ready: <title>" — that the run
+   works before any new inquiry: literature note from the capture, then
+   synthesis, never a re-fetch.
+
+Two things are marked rather than ingested, so a run never creates a second
+reference for one source and never silently loses a file: a drop whose
+DOI/ISBN/arXiv/URL matches a reference already on file becomes
+`<stem>.duplicate-of-<key>.pdf`, and one over `fetch.max_capture_mb`
+becomes `<stem>.too-large.pdf`; both get an INBOX entry. Nothing in
+`drop/` is ever cited; `ingest_drops.py --list` shows what is pending.
+
 ## Ad-hoc research
 
 ```sh
