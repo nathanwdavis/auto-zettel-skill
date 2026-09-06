@@ -13,6 +13,59 @@ have to — so the input paths need their own design.
 | Give a run feedback or an instruction | `capture.py … inbox`, or edit `INBOX.md` | `INBOX.md`, read first each cycle |
 | Get an answer **now** | `adhoc_research.sh` | a run branch, gated by CI |
 
+### The note generators (A12)
+
+The three routes above cover human input. The notes themselves have
+generators too, for the same reason and against the same invariant — the
+agents were previously told to write reference, literature, and permanent
+notes from `templates/` by hand, into a repo whose gates demand exact
+frontmatter:
+
+| Kind | Command | Refuses at write time |
+|---|---|---|
+| reference | `capture.py --repo R reference "Title" --doi X` | a second note for a source already on file (FR-4) |
+| literature | `capture.py --repo R literature "Title" --reference KEY --locator "p. 12"` | an unknown reference; an empty locator |
+| permanent | `capture.py --repo R permanent "Claim" --link KEY:relation` | no link (1-1-1); a relation outside FR-5; an unresolvable target |
+
+Each refuses at *write* time exactly what the lints refuse at *gate* time, so
+a generated note cannot fail the gate it was written for.
+
+`reference` also renders its Chicago strings and attempts verification at
+creation, through the same `verify_refs` the gate uses. With a resolvable DOI,
+ISBN, arXiv id, or PMID the note is gate-clean the moment it exists. Without
+one — or with `--offline` — it stays honestly `verified: false` and the tool
+says so:
+
+```
+UNVERIFIED: capture the source with `fetch_source.py --ref <key> --url <url>`,
+then run verify_refs.py. lint_citations fails until then -- that is the gate
+working, so do not hand-edit the verification block.
+```
+
+That red gate is the invariant doing its job. The way out is a capture, never
+an edit to the verification block.
+
+### Moving an inquiry along (A12)
+
+```sh
+scripts/capture.py --repo <repo> inquiry-update <key> --status in-progress
+scripts/capture.py --repo <repo> inquiry-update <key> --status answered \
+  --result-notes atomic-notes-compound-over-time--202608301200
+scripts/capture.py --repo <repo> inquiry-update <key> --note "Why this stalled."
+```
+
+It lives in `capture.py` rather than `inquiries.py` on purpose. `inquiries.py`
+is a read-only reporter (A9: a query is not an operation), and the manifest
+indexes an inquiry's `status` and `result_notes` — so a writer must rebuild it
+or the next `build_manifest --check` goes red on a PR that only moved a
+status. `capture.py` already logs and already rebuilds.
+
+Every check runs **before** anything is written, so a refused update leaves
+the inquiry exactly as it was: `answered` needs at least one result note
+(AC-6), and every result note must resolve to a **permanent** note. `--note`
+appends a dated paragraph to the body, which is where an unresolved question
+records why it stalled.
+
 ### Why a capture tool rather than looser gates
 
 A plain-markdown file in `fleeting/` makes `build_manifest.py` raise. The
@@ -115,7 +168,10 @@ so existing Routines get it) and, per file:
 
 1. moves it to `raw/<id>-<slug>.<ext>` — immutable evidence, exactly like a
    fetched capture — and writes `raw/<id>-<slug>.txt` with the text pypdf
-   extracts (first five pages), so agents and `query.py` can grep it;
+   extracts from **every** page, each marked `--- page N ---` so a literature
+   note can cite `p. N` without reopening the PDF. Identity detection still
+   reads only the first five pages: a DOI deep in a paper is almost always a
+   cited work's, not the source's own;
 2. writes `reference/<key>.md` with CSL-JSON: from the optional sidecar
    `<stem>.yml` (`title, author, year, doi, isbn, arxiv, pmid, url,
    source_tier, priority, notes, tags`), else from a DOI or arXiv id found in
@@ -127,6 +183,25 @@ so existing Routines get it) and, per file:
 4. files an INBOX entry — "Dropped source ready: <title>" — that the run
    works before any new inquiry: literature note from the capture, then
    synthesis, never a re-fetch.
+
+### A source handed to a session
+
+`drop/` is the route for a file you commit for the *next* cycle. When a
+session is handed a source right now — an attachment, a path on disk — it
+ingests that one file directly:
+
+```sh
+scripts/ingest_drops.py --repo <repo> --file ~/Downloads/paper.pdf \
+  --title "..." --author "Ahrens, Sönke" --year 2017 --doi 10.xxxx/yyy
+```
+
+The flags stand in for the sidecar, so nothing needs writing beside the file.
+The file is **copied**, never consumed — it belongs to whoever handed it over
+— and only that file is ingested, so a drop someone committed for the next
+scheduled cycle is not swept into this session's PR. A `--file` that turns out
+to duplicate a reference already on file is deleted rather than marked, and
+the command exits non-zero: nothing was handed to a future run, so there is
+nothing to report in INBOX.
 
 Two things are marked rather than ingested, so a run never creates a second
 reference for one source and never silently loses a file: a drop whose

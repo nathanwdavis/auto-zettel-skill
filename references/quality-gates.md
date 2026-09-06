@@ -37,11 +37,40 @@ of "make the gate pass".
 `build_manifest.py` additionally refuses a note whose `updated`/`created` is
 not an ISO-8601 date (FR-3), and a duplicate id.
 
+## Running them as CI will
+
+```sh
+scripts/remote_cycle.sh gates --repo <content-repo> [--online] [--mailto <email>]
+```
+
+One subcommand runs the whole list, in CI's order and with CI's arguments, so
+a session can see what the required check will see. `verify_refs` runs
+`--offline` by default for exactly the reason CI does: it re-checks what the
+run recorded against the captures in `raw/`, so a gate can never pass on a
+lucky live lookup. `--online` (or `--mailto`) opts into the registry check
+when a session wants it before handing over. The sandbox check needs a
+merge-base with the default branch and is skipped, with a note, when there is
+none — a scaffold with no origin has no cycle to describe.
+
+**`finish` runs this before it commits**, and refuses to commit or push when
+it fails. That closes a real gap: a session used to push a red branch and end,
+and CI reported the failure minutes later into an empty room, leaving a PR
+nobody was left to fix. The lock stays held on a refusal — the session still
+owns the cycle and can fix and re-run; `abort` is how it hands the lock back.
+`finish --no-gates` is the deliberate escape that hands a red state to CI,
+and it is logged as such.
+
+The order matters and is load-bearing: `finish` stages, gates, then re-stages.
+Staging first is what lets the sandbox check see a new note at all (it diffs
+tracked files); re-staging after is what commits the gates' own PASS lines, so
+the branch's `log.md` records that the gates ran on it.
+
 ## Where each binds
 
 | Site | What runs | Authority |
 |---|---|---|
-| In-session (prompt step 8) | all lints, fix-and-rerun | advisory — the model fixes its own work |
+| In-session (prompt step 8, or `remote_cycle.sh gates`) | all lints, fix-and-rerun | advisory — the model fixes its own work |
+| Remote `finish` | the merge gates, pre-commit | the push: a failure means nothing is committed or pushed (`--no-gates` overrides deliberately) |
 | Mode-A wrapper (`maintenance_run.sh`) | manifest `--check` + all three lints + sandbox gate, independently re-run after the session ends | the push: any failure means nothing is pushed (amendment A3) |
 | Mode-B CI (`ci/content-repo-gates.yml`) | verify `--offline` + manifest `--check` + all three lints + sandbox gate, server-side | the merge: the required `gates` check decides what reaches main |
 

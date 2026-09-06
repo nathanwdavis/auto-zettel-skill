@@ -83,6 +83,29 @@ scripts/capture.py --repo <content-repo> inbox    "Feedback for the next run"
 pbpaste | scripts/capture.py --repo <content-repo> fleeting "Clipped" --body -
 ```
 
+The knowledge notes have generators too, for the same reason — the agents were
+otherwise writing reference, literature, and permanent notes from `templates/`
+by hand:
+
+```sh
+scripts/capture.py --repo <content-repo> reference --doi 10.48550/arXiv.2608.27454
+scripts/capture.py --repo <content-repo> literature "Tang on skill evolution" \
+  --reference wikiskill--202608301000 --locator "§3.1"
+scripts/capture.py --repo <content-repo> permanent "Skills compound like notes" \
+  --link wikiskill--202608301000:source
+scripts/capture.py --repo <content-repo> inquiry-update <key> --status answered \
+  --result-notes skills-compound-like-notes--202609010900
+```
+
+Each refuses at write time what the lints refuse at gate time: a second
+reference note for a source already on file, a relation outside the FR-5
+taxonomy, an unresolvable link target, a literature note with no locator, an
+inquiry marked `answered` with nothing to point at. `reference` enriches from
+Crossref, renders the Chicago strings, and verifies through the same
+`verify_refs.py` the gate uses — so a note with a resolvable identifier is
+gate-clean the moment it exists, and one without says so plainly instead of
+looking green.
+
 Never hand-write a note file. The gates demand exact frontmatter, and a
 malformed file in `fleeting/` fails the manifest build for the *next scheduled
 run* — the person who dropped it never sees the breakage. `capture.py`
@@ -101,6 +124,10 @@ An **inquiry** is an open question tracked across runs
 cp ~/Downloads/paper.pdf <content-repo>/drop/      # optional: paper.yml beside it
 git -C <content-repo> add drop && git -C <content-repo> commit -m "drop: paper"
 scripts/ingest_drops.py --repo <content-repo>       # or wait for the next cycle
+
+# or, for a source a session was just handed, in one command:
+scripts/ingest_drops.py --repo <content-repo> --file ~/Downloads/paper.pdf \
+  --title "..." --author "Ahrens, Sönke" --year 2017
 ```
 
 Paywalled papers, PDFs an author sent, pages no fetcher renders: put the
@@ -110,6 +137,13 @@ immutable evidence with a text extraction beside it, a reference note is
 written from the optional sidecar or a DOI found in the text (enriched from
 Crossref), verified on the capture, and an INBOX entry asks the run to write
 the notes. Duplicates and oversize files are marked in place and reported.
+
+The extraction covers **every** page, each marked `--- page N ---`, so a
+literature note can cite `p. N` without reopening the PDF; identity detection
+still reads only the first five pages, because a DOI deep in a paper is
+almost always a cited work's. `--file` copies an external source in and
+ingests only that file, leaving the caller's copy alone and leaving drops
+committed for the next scheduled cycle untouched.
 Details: [`references/capture.md`](references/capture.md).
 
 For sources the agents fetch themselves, `scripts/fetch_source.py` names and
@@ -237,6 +271,17 @@ scripts/lint_links.py     --repo <content-repo>
 scripts/lint_skills.py    --repo <content-repo>
 ```
 
+Or run the whole list exactly as CI will, including the sandbox check:
+
+```sh
+scripts/remote_cycle.sh gates --repo <content-repo>
+```
+
+`remote_cycle.sh finish` runs that itself before it commits, and refuses to
+push a branch whose gates fail — a session used to push red and end, leaving
+CI to report the failure into an empty room. `--no-gates` hands a red state to
+CI deliberately, and says so in `log.md`.
+
 The lints exit non-zero and print `FILE⇥RULE⇥REASON` for each problem.
 `lint_links.py` also enforces the inquiry lifecycle (AC-6).
 `verify_refs.py --offline` verifies from `raw/` captures only when there is no
@@ -272,8 +317,8 @@ PLAN.md                      phase status and build order
 
 `scripts/zettel_lib/` is an addition to the layout the spec prescribes: the
 Python entry points share frontmatter parsing, note naming, repo access, HTTP,
-citation rendering, similarity scoring, and the git lock, and duplicating those
-across twenty entry points would guarantee they drift.
+citation rendering, reference building, similarity scoring, and the git lock,
+and duplicating those across twenty entry points would guarantee they drift.
 
 ## Working on the skill itself
 
@@ -288,7 +333,7 @@ pip install -r requirements-dev.txt
 ./smoke_test.sh
 ```
 
-`smoke_test.sh` runs the full pytest suite (421 tests) plus an end-to-end
+`smoke_test.sh` runs the full pytest suite (479 tests) plus an end-to-end
 genesis scaffold. To run pytest alone, use the virtualenv's interpreter —
 `pytest` is generally not installed in the system python:
 

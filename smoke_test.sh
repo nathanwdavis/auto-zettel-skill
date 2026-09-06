@@ -247,6 +247,88 @@ for g in build_manifest.py lint_citations.py lint_links.py; do
 done
 pass "a dropped PDF was ingested into a gate-clean reference and capture (A11)"
 
+# A12: the note generators. Each must refuse at WRITE time what the lints
+# refuse at gate time, and the reference generator must be honest about what it
+# could not verify rather than writing a green-looking block.
+GREF="$("$PY" scripts/capture.py --repo "$KB" reference "A Generated Source" \
+  --author "Smoke, Sam" --year 2026 --url https://example.org/generated \
+  --source-tier general-web --offline 2>/dev/null)" || fail "capture.py reference"
+GREFKEY="$(basename "$GREF" .md)"
+grep -q "^chicago_note: ." "$KB/$GREF" || fail "reference generator left chicago_note empty"
+# The lint EXITS 1 here by design, and pipefail would read that as the step
+# failing -- capture first, then match.
+GLINT="$("$PY" scripts/lint_citations.py --repo "$KB" 2>/dev/null || true)"
+echo "$GLINT" | grep -q "unverified-reference" \
+  || fail "an uncaptured reference should fail the citation gate honestly"
+pass "capture.py reference rendered Chicago strings and reported itself unverified"
+
+"$PY" scripts/capture.py --repo "$KB" reference "Dup" --url https://example.org/generated \
+  --offline >/dev/null 2>&1 && fail "a duplicate source should be refused (FR-4)"
+"$PY" scripts/capture.py --repo "$KB" permanent "Bad" --link "$GREFKEY:cites" >/dev/null 2>&1 \
+  && fail "a relation outside FR-5 should be refused"
+"$PY" scripts/capture.py --repo "$KB" literature "Bad" --reference "$GREFKEY" --locator "" \
+  >/dev/null 2>&1 && fail "a literature note with no locator should be refused"
+pass "the generators refuse a duplicate source, a bad relation, and an empty locator"
+
+# The honest path to green: capture the source, verify, then write the notes.
+GID="${GREFKEY##*--}"; GSLUG="${GREFKEY%--*}"
+printf 'Verbatim capture for the smoke test.\n' > "$KB/raw/$GID-$GSLUG.txt"
+"$PY" - "$KB" "$GREF" "raw/$GID-$GSLUG.txt" <<'CAPPY'
+import sys
+sys.path.insert(0, "scripts")
+from pathlib import Path
+from zettel_lib.frontmatter import Note
+note = Note.load(Path(sys.argv[1]) / sys.argv[2])
+note.meta["raw_capture"] = sys.argv[3]
+note.save()
+CAPPY
+"$PY" scripts/verify_refs.py --repo "$KB" --offline >/dev/null || fail "verify_refs after capture"
+GLIT="$("$PY" scripts/capture.py --repo "$KB" literature "Sam on generation" \
+  --reference "$GREFKEY" --locator "p. 1")" || fail "capture.py literature"
+"$PY" scripts/capture.py --repo "$KB" permanent "Generated notes pass the gates" \
+  --link "$(basename "$GLIT" .md):elaborates" >/dev/null || fail "capture.py permanent"
+for g in build_manifest.py lint_citations.py lint_links.py; do
+  args=(); [[ "$g" == build_manifest.py ]] && args=(--check)
+  "$PY" "scripts/$g" --repo "$KB" "${args[@]}" >/dev/null || fail "$g after the generators"
+done
+pass "generated reference, literature, and permanent notes pass every gate"
+
+# A12: the inquiry updater enforces AC-6 before it writes anything.
+UINQ="$(basename "$(ls "$KB"/inquiries/*.md | head -1)" .md)"
+"$PY" scripts/capture.py --repo "$KB" inquiry-update "$UINQ" --status answered >/dev/null 2>&1 \
+  && fail "answered with no result_notes should be refused (AC-6)"
+UPERM="$(basename "$(ls "$KB"/permanent/generated-notes-pass-the-gates--*.md | head -1)" .md)"
+"$PY" scripts/capture.py --repo "$KB" inquiry-update "$UINQ" --status answered \
+  --result-notes "$UPERM" >/dev/null || fail "capture.py inquiry-update"
+"$PY" scripts/build_manifest.py --repo "$KB" --check >/dev/null \
+  || fail "inquiry-update left the manifest stale"
+"$PY" scripts/lint_links.py --repo "$KB" >/dev/null || fail "lint_links after inquiry-update"
+pass "inquiry-update refused AC-6, then answered and rebuilt the manifest"
+
+# A12: --file ingests one external source and leaves the caller's file alone.
+"$PY" - "$WORK" <<'EXTPY'
+import sys
+sys.path.insert(0, "tests"); sys.path.insert(0, "scripts")
+from pathlib import Path
+from conftest import make_pdf
+Path(sys.argv[1], "attached.pdf").write_bytes(
+    make_pdf(pages=["An attached smoke source", "Page two of the attachment"]))
+EXTPY
+"$PY" scripts/ingest_drops.py --repo "$KB" --file "$WORK/attached.pdf" \
+  --title "An Attached Smoke Source" --author "Smoke, Sam" --year 2026 --offline \
+  | grep -q "^ingested" || fail "ingest_drops.py --file"
+[[ -f "$WORK/attached.pdf" ]] || fail "--file consumed the caller's file instead of copying it"
+ATXT="$(ls "$KB"/raw/*-an-attached-smoke-source.txt)"
+grep -q -- "--- page 2 ---" "$ATXT" || fail "extraction is missing page markers"
+grep -q "Page two of the attachment" "$ATXT" || fail "a late page was truncated away"
+pass "--file ingested an attachment with page-marked full text, leaving the original"
+
+# A12: the gates subcommand runs CI's list, and finish refuses a red branch.
+"$PY" scripts/build_manifest.py --repo "$KB" >/dev/null
+bash scripts/remote_cycle.sh gates --repo "$KB" 2>/dev/null | grep -q "gates: PASS" \
+  || fail "remote_cycle.sh gates on a clean repo"
+pass "remote_cycle.sh gates ran the merge gates"
+
 # Ad-hoc research shares the lock with scheduled runs and never reaches main.
 AKB="$WORK/kb-adhoc"
 git clone -q "$RORIGIN" "$AKB"
@@ -263,6 +345,16 @@ ADHOC_BLOCKED="$(ZETTEL_RUN_HOLDER=adhoc-2 bash scripts/adhoc_research.sh \
 echo "$ADHOC_BLOCKED" | grep -q "rc=3" \
   || fail "ad-hoc did not stand down while the lock was held (got: $ADHOC_BLOCKED)"
 pass "a second ad-hoc run stood down on the shared lock (exit 3)"
+
+# finish gates before it pushes: a red branch must not reach a PR nobody is
+# left to fix. The lock stays held, so the same session can fix and re-run.
+echo "no frontmatter here" > "$AKB/fleeting/broken.md"
+bash scripts/remote_cycle.sh finish --repo "$AKB" --title "should not land" >/dev/null 2>&1 \
+  && fail "finish pushed a branch whose gates fail"
+git -C "$RORIGIN" branch | grep -q "$ABRANCH" \
+  && fail "a gate-failing branch reached origin"
+rm "$AKB/fleeting/broken.md"
+pass "finish refused to push a branch that fails the gates"
 
 MAIN_BEFORE="$(git -C "$RORIGIN" rev-parse main)"
 bash scripts/remote_cycle.sh finish --repo "$AKB" --title "smoke ad-hoc" >/dev/null \

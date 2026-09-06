@@ -1,9 +1,9 @@
 # Build Plan — `zettel-bootstrap` Claude Code Skill
 
-**Source of truth:** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (all FR-x / AC-x / NFR-x / QA-x / checklist references below point there). Deviations forced by implementation are recorded there as numbered amendments — **A1–A11** so far.
+**Source of truth:** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (all FR-x / AC-x / NFR-x / QA-x / checklist references below point there). Deviations forced by implementation are recorded there as numbered amendments — **A1–A12** so far.
 **Working on this repo:** [`.claude/CLAUDE.md`](.claude/CLAUDE.md) — how to run the suite, the environment's sharp edges, and the conventions.
 **This repo:** the skill repo. It contains ONLY the `zettel-bootstrap` plugin — never zettelkasten content. The content repo is created at genesis runtime by `init_content_repo.sh` and is out of scope for this repo's file tree. Both repos are public (A4); nothing here may contain a secret (NFR-4).
-**Status:** All phases complete — 1, 2, 3, 3.5, 3.6 (PR #5), 4 (PR #6) — plus two rounds of field fixes from live scheduled runs: issue #7 → PR #8 (amendment A8), and the stale-install/frozen-prompt round → PR #10. Every §12 checklist item passes. **Round 8 (session flows, three phases) is planned, not started** — see its section in §2. What else remains is operational, not code: see **Handoff — next steps** at the end of §2.
+**Status:** All phases complete — 1, 2, 3, 3.5, 3.6 (PR #5), 4 (PR #6) — plus two rounds of field fixes from live scheduled runs: issue #7 → PR #8 (amendment A8), and the stale-install/frozen-prompt round → PR #10. Every §12 checklist item passes. **Round 8 (session flows): Phase 1 shipped (amendment A12); Phases 2 and 3 planned** — see its section in §2. What else remains is operational, not code: see **Handoff — next steps** at the end of §2.
 
 ---
 
@@ -352,7 +352,7 @@ no pypdf / sandbox gate on the move); `start` and the wrapper ingest a drop;
 OA lookup is enrichment (an unreachable OA registry never blocks Crossref);
 a shell with `renderer: none` is never saved.
 
-### Post-Phase-4 round 8 — session flows, by layer  📋 planned
+### Post-Phase-4 round 8 — session flows, by layer  🔨 Phase 1 shipped; 2 and 3 planned
 *Amendment A12 (to be appended when Phase 2 ships). Exit gate: each of the
 three session use cases runs end to end from one slash command with no
 hand-written frontmatter and no hand-sequenced lock/branch/gate steps.*
@@ -378,7 +378,7 @@ so each ships green and is useful alone; **no quotation schema change** --
 quotes stay in permanent notes with a verified reference link, literature
 notes stay own-words, and passage mining yields candidates with page locators.
 
-**Phase 1 -- foundations**
+**Phase 1 -- foundations  ✅ shipped** (479 tests, smoke exit 0, strict validate clean)
 1. `capture.py` gains `reference` (from DOI/ISBN/arXiv/PMID/URL and/or
    title/author/year; Crossref-enriched unless `--offline`; duplicate check
    via `citations.source_identity`; Chicago strings rendered and
@@ -401,6 +401,23 @@ notes stay own-words, and passage mining yields candidates with page locators.
 5. `ingest_drops.py --file PATH` with sidecar fields as flags: copies an
    external file (a session attachment) into `drop/` and ingests only it;
    a duplicate deletes the copy and exits 1 rather than filing INBOX noise.
+
+What Phase 1 taught, kept for whoever builds on it:
+
+- **The gates write to `log.md`, so gating dirties the tree it just gated.**
+  `finish` must stage, gate, then re-stage: the first staging is what lets
+  `check_skill_sandbox` see new files at all (it diffs tracked paths), the
+  second is what commits the gates' own PASS lines. Two existing tests caught
+  the missing re-stage immediately (`test_finish_leaves_a_clean_tree`,
+  `test_every_step_is_logged_with_the_skill_revision`) -- the audit property
+  they protect is that a branch's `log.md` proves the gates ran *on that
+  branch*.
+- **A lint exiting 1 is the success case in a smoke assertion**, and `pipefail`
+  reads it as the step failing. Capture the output first (`X="$(lint || true)"`)
+  and match against it.
+- **`PYTHON` must be absolute.** `maintenance_run.sh` runs the headless session
+  from inside the content repo, so a relative interpreter path dies with exit
+  127 several steps later, where it looks like a stub-binary problem.
 
 **Phase 2 -- flows, entry point, sub-skills, docs**
 6. `scripts/session_cycle.sh <ask|ingest|query>`: one script owns lock,
