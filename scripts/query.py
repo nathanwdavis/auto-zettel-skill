@@ -15,7 +15,8 @@ TF-IDF the serendipity sweep uses (``zettel_lib.similarity``), applied query
 vs. note instead of note vs. note; titles and tags are weighted above bodies
 because a permanent note's title is its claim.
 
-    query.py --repo <path> "<query>" [--top N] [--json] [--mermaid] [--file-gaps]
+    query.py --repo <path> "<query>" [--top N] [--gaps N] [--json] [--mermaid]
+             [--file-gaps [g1,g3]]
 
 A query is not an operation, so nothing is appended to log.md (A9). The one
 exception is explicit: ``--file-gaps`` turns the report's suggested
@@ -28,8 +29,10 @@ have it done. That IS an operation, and it logs like one.
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -41,6 +44,56 @@ from zettel_lib.frontmatter import FrontmatterError, Note
 from zettel_lib.repo import ContentRepo, ContentRepoError, dig
 
 TYPE_ORDER = ("permanent", "literature", "reference", "moc", "fleeting")
+
+#: Gap kinds in the order a run should work them, and the capture kind that
+#: closes each. The order is load-bearing: `session_query_prompt.md` tells a
+#: session to work the filed entries in the order they were filed, so filing
+#: order has to encode priority. It used to be implicit in the sequence of
+#: `if` blocks below, which meant adding a gap in the wrong place silently
+#: reordered a session's work.
+#:
+#: Research gaps become inquiries -- questions a run goes out and answers.
+#: Everything else becomes an INBOX entry, because the material is already in
+#: the repository: filing "nothing has been distilled from these sources" as an
+#: inquiry would send the researcher to re-fetch what the base already holds.
+GAP_KINDS = (
+    ("unresearched", "inquiry"),
+    ("weak-sourcing", "inquiry"),
+    ("stale-inquiry", "inbox"),
+    ("undistilled", "inbox"),
+    ("unsummarised-reference", "inbox"),
+    ("orphan-claim", "inbox"),
+    ("unmapped", "inbox"),
+    ("raw-mentions", "inbox"),
+)
+GAP_RANK = {kind: i for i, (kind, _) in enumerate(GAP_KINDS, start=1)}
+
+#: `--file-gaps` with no value files everything, which is what it has always
+#: done; a value selects by id.
+ALL_GAPS = "*"
+GAP_ID = re.compile(r"^[gG](\d+)$")
+
+
+@dataclass
+class Gap:
+    """One absence the report found, and the follow-up that would close it.
+
+    ``suggestion`` is the dict itself rather than an index, because two gaps
+    can share one follow-up -- "no note uses these terms" and "nothing matched
+    at all" are two ways of saying the base lacks the topic, and they must not
+    file two identical inquiries. Indices are assigned at the end, after
+    ranking, when the surviving suggestions are known.
+    """
+
+    kind: str
+    text: str
+    suggestion: dict
+    keys: tuple[str, ...] = ()
+    terms: tuple[str, ...] = ()
+
+    def sort_key(self) -> tuple[int, str]:
+        """Rank first, then a stable string -- never a score, never dict order."""
+        return (GAP_RANK[self.kind], " ".join(self.keys or self.terms))
 #: A title is the claim and tags are the curated vocabulary; a body mentions
 #: many things in passing. Repeating them weights the vector accordingly.
 TITLE_WEIGHT = 3
@@ -62,7 +115,45 @@ def doc_text(note: Note) -> str:
     return "\n".join(parts)
 
 
-def query(repo: ContentRepo, text: str, top: int = 15) -> dict:
+def rank_gaps(found: list[Gap], cap: int = 0) -> tuple[list[str], list[dict], list[dict]]:
+    """Order the gaps, number them, and collect the follow-ups they point at.
+
+    Ids are assigned AFTER the sort, so `g1` is always the highest-priority gap
+    and "work them in the order they were filed" stays true. They are
+    report-local: the same repo and query reproduce them exactly, and adding a
+    note renumbers them. That is the trade -- an id durable across repository
+    changes would have to be a content hash, which nobody can type into
+    `--file-gaps g1,g3`.
+
+    ``cap`` truncates after ranking, so the cap keeps the gaps that matter and
+    drops a follow-up whose only gaps were cut. Capping the display while still
+    filing everything would make the printed receipt lie about what happened.
+    """
+    ordered = sorted(found, key=Gap.sort_key)
+    if cap > 0:
+        ordered = ordered[:cap]
+
+    # Suggestions come out in gap order, and a shared one appears once.
+    suggestions: list[dict] = []
+    index: dict[int, int] = {}
+    for gap in ordered:
+        if id(gap.suggestion) not in index:
+            index[id(gap.suggestion)] = len(suggestions)
+            suggestions.append(dict(gap.suggestion, gaps=[]))
+
+    gaps, details = [], []
+    for position, gap in enumerate(ordered, start=1):
+        gap_id = f"g{position}"
+        slot = index[id(gap.suggestion)]
+        suggestions[slot]["gaps"].append(gap_id)
+        gaps.append(f"{gap_id}: {gap.text}")
+        details.append({"id": gap_id, "rank": GAP_RANK[gap.kind], "kind": gap.kind,
+                        "text": gap.text, "keys": list(gap.keys),
+                        "terms": list(gap.terms), "suggestion": slot})
+    return gaps, details, suggestions
+
+
+def query(repo: ContentRepo, text: str, top: int = 15, *, gap_cap: int = 0) -> dict:
     notes, warnings = load_notes(repo)
     by_key = {n.key: n for n in notes if n.key}
     id_to_key = {n.id: n.key for n in notes if n.id and n.key}
@@ -143,47 +234,60 @@ def query(repo: ContentRepo, text: str, top: int = 15) -> dict:
 
     by_type = {t: sum(1 for m in matched if m["type"] == t) for t in TYPE_ORDER}
 
-    # Each gap maps to one concrete follow-up the next run could act on. They
-    # are suggestions: printed as ready-to-run capture commands, and executed
-    # only under --file-gaps. Research gaps become inquiries (questions a run
-    # works); distillation and mapping gaps become INBOX entries (instructions
-    # to the synthesizer and librarian) -- filing them as inquiries would ask
-    # the researcher to fetch sources the base already holds.
-    gaps, suggestions = [], []
+    # Each gap names one absence and points at the follow-up that would close
+    # it. They are suggestions: printed as ready-to-run capture commands, and
+    # executed only under --file-gaps. Which capture kind each gap files, and
+    # in what order, is GAP_KINDS above.
+    found: list[Gap] = []
     repo_arg = shlex.quote(str(repo.root))
 
-    def suggest(kind: str, title: str, why: str, priority: str = "normal") -> None:
+    def suggest(kind: str, title: str, why: str, priority: str = "normal") -> dict:
         cmd = f"scripts/capture.py --repo {repo_arg} {kind} {shlex.quote(title)}"
         if kind == "inquiry":
             cmd += f" --priority {priority}"
-        suggestions.append({"kind": kind, "title": title, "priority": priority,
-                            "why": why, "command": cmd})
+        return {"kind": kind, "title": title, "priority": priority,
+                "why": why, "command": cmd}
 
-    if missing:
-        gaps.append("no note uses the term(s) " + ", ".join(f"'{t}'" for t in missing)
-                    + "; the base has nothing on them")
-    if not matched:
-        gaps.append("no note matches this query at all")
     if missing or not matched:
-        suggest("inquiry", text, "research the topic the base lacks")
+        # One follow-up, up to two ways of describing the same absence: both
+        # say the base lacks the topic, and filing two identical inquiries for
+        # it would be noise the next run has to reconcile.
+        research = suggest("inquiry", text, "research the topic the base lacks")
+        if missing:
+            found.append(Gap(
+                "unresearched",
+                "no note uses the term(s) " + ", ".join(f"'{t}'" for t in missing)
+                + "; the base has nothing on them",
+                research, terms=tuple(missing)))
+        if not matched:
+            found.append(Gap("unresearched", "no note matches this query at all",
+                             research, terms=tuple(sorted(q_terms))))
     if matched and by_type["permanent"] == 0:
-        gaps.append("sources or summaries match but no permanent note does: "
-                    "nothing has been distilled into a claim yet")
         material = [m["key"] for m in matched if m["type"] != "moc"]
-        suggest("inbox", f"Distil a permanent note on {text} from: " + ", ".join(material),
-                "the synthesizer's job, not the researcher's")
+        found.append(Gap(
+            "undistilled",
+            "sources or summaries match but no permanent note does: "
+            "nothing has been distilled into a claim yet",
+            suggest("inbox", f"Distil a permanent note on {text} from: " + ", ".join(material),
+                    "the synthesizer's job, not the researcher's"),
+            keys=tuple(material)))
     # Same source as the moc_membership field: two implementations would
     # eventually disagree about whether a note is reachable from INDEX, which is
     # the only thing either of them is for.
     uncovered = [m["key"] for m in matched
                  if m["type"] != "moc" and not moc_membership[m["key"]]]
     if uncovered:
-        gaps.append(f"{len(uncovered)} matched note(s) sit in no map of content, so a "
-                    "reader walking down from INDEX cannot find them: "
-                    + ", ".join(f"`{k}`" for k in uncovered))
-        suggest("inbox", "Add to a map of content: " + ", ".join(uncovered)
-                + f" (surfaced by a query for: {text})",
-                "the librarian's job")
+        found.append(Gap(
+            "unmapped",
+            f"{len(uncovered)} matched note(s) sit in no map of content, so a "
+            "reader walking down from INDEX cannot find them: "
+            + ", ".join(f"`{k}`" for k in uncovered),
+            suggest("inbox", "Add to a map of content: " + ", ".join(uncovered)
+                    + f" (surfaced by a query for: {text})",
+                    "the librarian's job"),
+            keys=tuple(uncovered)))
+
+    gaps, gap_details, suggestions = rank_gaps(found, cap=gap_cap)
     cfg = {}
     try:
         cfg = repo.config()
@@ -207,13 +311,41 @@ def query(repo: ContentRepo, text: str, top: int = 15) -> dict:
         "inquiries": inquiries,
         "topics": touched_topics,
         "gaps": gaps,
+        "gap_details": gap_details,
         "suggestions": suggestions,
         "filed": [],
         "warnings": warnings,
     }
 
 
-def file_gaps(repo: ContentRepo, report: dict) -> list[dict]:
+def select_suggestions(report: dict, selection: str) -> list[dict]:
+    """The suggestions ``selection`` names, or all of them for a bare flag.
+
+    Every id is validated before anything is written, the way
+    ``capture.py inquiry-update`` validates before it writes: an id that is not
+    in this report means the caller is acting on a report they are no longer
+    reading, and filing "the ones that did exist" would file the wrong things
+    silently.
+    """
+    if selection == ALL_GAPS:
+        return list(report["suggestions"])
+    wanted, known = [], {d["id"]: d for d in report["gap_details"]}
+    for raw in selection.split(","):
+        item = raw.strip()
+        if not GAP_ID.match(item):
+            raise ValueError(
+                f"--file-gaps takes gap ids like 'g1,g3'; got {item!r}"
+                + (" (put the query before the flag)" if " " in item or not item else ""))
+        item = item.lower()
+        if item not in known:
+            have = ", ".join(d["id"] for d in report["gap_details"]) or "no gaps"
+            raise ValueError(f"unknown gap id {item!r}; this report has {have}")
+        wanted.append(known[item]["suggestion"])
+    # Two selected gaps can share one follow-up; file it once, in report order.
+    return [report["suggestions"][i] for i in sorted(set(wanted))]
+
+
+def file_gaps(repo: ContentRepo, report: dict, selection: str = ALL_GAPS) -> list[dict]:
     """Turn the report's suggestions into captures (the --file-gaps path).
 
     Goes through capture.py's own functions so the artifacts are exactly what
@@ -221,15 +353,16 @@ def file_gaps(repo: ContentRepo, report: dict) -> list[dict]:
     and rebuilds the manifest once at the end, the way capture.py does after
     an inquiry, so a capture-only commit still passes the currency gate.
     """
+    chosen = select_suggestions(report, selection)
     filed = []
-    for s in report["suggestions"]:
+    for s in chosen:
         if s["kind"] == "inquiry":
             path = capture.capture_inquiry(repo, s["title"], "", s["priority"])
         else:
             path = capture.capture_inbox(repo, s["title"], "")
         rel = repo.rel(path)
         repo.append_log(f"query --file-gaps: {s['kind']} -> {rel}")
-        filed.append({"kind": s["kind"], "path": rel})
+        filed.append({"kind": s["kind"], "path": rel, "gaps": list(s.get("gaps", ()))})
     if any(f["kind"] == "inquiry" for f in filed):
         capture.build_manifest.regenerate(repo)
     report["filed"] = filed
@@ -305,19 +438,24 @@ def render(report: dict, repo_path: str, mermaid: bool = False) -> str:
     if report["filed"]:
         out.append("## Filed for the next run")
         for f in report["filed"]:
-            out.append(f"- {f['kind']}: `{f['path']}`")
+            closes = ", ".join(f.get("gaps", ()))
+            out.append(f"- {f['kind']}: `{f['path']}`"
+                       + (f" (closes {closes})" if closes else ""))
         out.append("")
         out.append("Commit these so the next scheduled run sees them (from a remote "
                    "session: on a branch, via a PR).")
     elif report["suggestions"]:
         out.append("## Suggested follow-ups (nothing has been filed)")
         for s in report["suggestions"]:
-            out.append(f"- {s['kind']}: {s['title']}")
+            closes = ", ".join(s.get("gaps", ())) or "-"
+            out.append(f"- [{closes}] {s['kind']}: {s['title']}")
             out.append(f"  why: {s['why']}")
             out.append(f"  {s['command']}")
         out.append("")
         out.append(f"To file all {len(report['suggestions'])} at once, re-run this query "
-                   "with --file-gaps (or ask the session to).")
+                   "with --file-gaps (or ask the session to); to file a selection, name "
+                   "the gap ids: --file-gaps g1,g3. Ids belong to this report -- they are "
+                   "the same for the same repo and query, and renumber as the repo grows.")
     else:
         out.append("This report wrote nothing, and found nothing worth filing.")
     for w in report["warnings"]:
@@ -334,18 +472,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mermaid", action="store_true",
                         help="include a Mermaid diagram of the subgraph in the report "
                              "(the JSON always carries it)")
-    parser.add_argument("--file-gaps", action="store_true",
+    parser.add_argument("--gaps", type=int, default=0, metavar="N",
+                        help="report at most N gaps, highest priority first (0 = all)")
+    parser.add_argument("--file-gaps", nargs="?", const=ALL_GAPS, default=None,
+                        metavar="g1,g3",
                         help="capture the suggested follow-ups (inquiries / INBOX entries) "
-                             "through capture.py instead of only printing them")
+                             "through capture.py instead of only printing them; bare files "
+                             "every one, or name the gap ids to file")
     args = parser.parse_args(argv)
     if not args.query.strip():
         print("error: empty query", file=sys.stderr)
         return EXIT_USAGE
+    if args.gaps < 0:
+        print("error: --gaps must be >= 0", file=sys.stderr)
+        return EXIT_USAGE
     repo = open_repo(args.repo)
     try:
-        report = query(repo, args.query, top=max(1, args.top))
-        if args.file_gaps:
-            file_gaps(repo, report)
+        report = query(repo, args.query, top=max(1, args.top), gap_cap=args.gaps)
+        # `is not None` is what keeps "writes nothing without --file-gaps"
+        # literally true: an empty selection string is still a request.
+        if args.file_gaps is not None:
+            file_gaps(repo, report, args.file_gaps)
     except (ContentRepoError, FrontmatterError, OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_USAGE

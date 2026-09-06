@@ -244,6 +244,117 @@ def test_mermaid_on_a_query_that_matches_nothing_is_still_valid(clean_repo):
     assert data["mermaid"] == "graph LR\n  %% no notes matched"
 
 
+# -- gap ids, ranks, and selection (Phase 3) ----------------------------------
+
+def test_gaps_stay_a_list_of_strings(two_cluster_repo):
+    """A PLAN.md invariant: the structure went to gap_details, not into gaps."""
+    data = json.loads(report(two_cluster_repo, "reinvested returns", "--json",
+                             "--top", "1").stdout)
+    assert data["gaps"] and all(isinstance(g, str) for g in data["gaps"])
+
+
+def test_gaps_carry_ids_in_priority_order(clean_repo):
+    """A research gap outranks a mapping gap, and g1 is the one to work first."""
+    data = json.loads(report(clean_repo, "quantum chromodynamics", "--json").stdout)
+    assert data["gaps"][0].startswith("g1: ")
+    ranks = [d["rank"] for d in data["gap_details"]]
+    assert ranks == sorted(ranks)
+    assert [d["id"] for d in data["gap_details"]] == [f"g{i}" for i in
+                                                     range(1, len(ranks) + 1)]
+
+
+def test_gap_ids_are_stable_across_runs(clean_repo):
+    a = json.loads(report(clean_repo, "quantum chromodynamics", "--json").stdout)
+    b = json.loads(report(clean_repo, "quantum chromodynamics", "--json").stdout)
+    assert a["gaps"] == b["gaps"]
+    assert a["gap_details"] == b["gap_details"]
+
+
+def test_two_gaps_sharing_one_suggestion_file_it_once(clean_repo):
+    """"No note uses these terms" and "nothing matched" are one absence."""
+    data = json.loads(report(clean_repo, "quantum chromodynamics", "--json").stdout)
+    assert len(data["gap_details"]) == 2
+    assert {d["suggestion"] for d in data["gap_details"]} == {0}
+    assert data["suggestions"][0]["gaps"] == ["g1", "g2"]
+    filed = json.loads(report(clean_repo, "quantum chromodynamics", "--json",
+                              "--file-gaps").stdout)["filed"]
+    assert len(filed) == 1
+    assert filed[0]["gaps"] == ["g1", "g2"]
+
+
+def test_gaps_cap_keeps_the_highest_ranked(two_cluster_repo):
+    full = json.loads(report(two_cluster_repo, "atomic notes compound", "--json").stdout)
+    capped = json.loads(report(two_cluster_repo, "atomic notes compound", "--json",
+                               "--gaps", "1").stdout)
+    assert len(full["gap_details"]) >= 1
+    assert len(capped["gap_details"]) == 1
+    assert capped["gap_details"][0]["kind"] == full["gap_details"][0]["kind"]
+
+
+def test_a_capped_gap_cannot_be_filed(clean_repo):
+    """The cap bounds what --file-gaps can write, so the receipt cannot lie."""
+    out = report(clean_repo, "quantum chromodynamics", "--json", "--gaps", "1",
+                 "--file-gaps").stdout
+    data = json.loads(out)
+    assert len(data["gap_details"]) == 1
+    assert data["filed"][0]["gaps"] == ["g1"]
+
+
+def test_file_gaps_selection_files_only_the_named_gap(two_cluster_repo):
+    before = set(p.name for p in (two_cluster_repo / "inquiries").glob("*.md"))
+    data = json.loads(report(two_cluster_repo, "reinvested returns", "--json",
+                             "--top", "1", "--file-gaps", "g1").stdout)
+    assert [f["gaps"] for f in data["filed"]] == [["g1"]]
+    assert set(p.name for p in (two_cluster_repo / "inquiries").glob("*.md")) == before
+
+
+def test_file_gaps_bare_still_files_everything(clean_repo):
+    data = json.loads(report(clean_repo, "quantum chromodynamics", "--json",
+                             "--file-gaps").stdout)
+    assert len(data["filed"]) == len(data["suggestions"])
+
+
+def test_file_gaps_before_top_still_means_all(clean_repo):
+    """The exact argv session_cycle.sh builds: --file-gaps, then --top.
+
+    argparse must not read `--top` as the selection value. This is silent
+    corruption rather than a crash, so it gets its own test.
+    """
+    result = run_script("query.py", clean_repo, "quantum chromodynamics",
+                        "--json", "--file-gaps", "--top", "5")
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert len(data["filed"]) == len(data["suggestions"]) == 1
+
+
+def test_unknown_gap_id_is_a_usage_error_and_writes_nothing(clean_repo):
+    before = tree_hash(clean_repo)
+    result = run_script("query.py", clean_repo, "quantum chromodynamics",
+                        "--file-gaps", "g99")
+    assert result.returncode == 2
+    assert "unknown gap id" in result.stderr
+    assert tree_hash(clean_repo) == before, "a rejected selection still wrote"
+
+
+def test_a_query_shaped_gap_selection_is_refused_and_writes_nothing(clean_repo):
+    """`--file-gaps <query>` swallows the query as the selection value.
+
+    It must never be mistaken for a real selection. (While `query` is a
+    required positional argparse catches it first; once --from-file makes the
+    positional optional, query.py's own validator reports it -- asserted in
+    test_a_query_shaped_gap_selection_names_the_fix.)
+    """
+    before = tree_hash(clean_repo)
+    result = run_script("query.py", clean_repo, "--file-gaps", "atomic notes")
+    assert result.returncode == 2
+    assert tree_hash(clean_repo) == before
+
+
+def test_negative_gap_cap_is_a_usage_error(clean_repo):
+    assert run_script("query.py", clean_repo, "atomic notes",
+                      "--gaps", "-1").returncode == 2
+
+
 def test_empty_query_is_a_usage_error(clean_repo):
     assert run_script("query.py", clean_repo, "   ").returncode == 2
 
