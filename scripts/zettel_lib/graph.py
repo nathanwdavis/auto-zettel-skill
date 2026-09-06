@@ -106,3 +106,68 @@ def moc_membership(key: str, inbound: dict[str, set[str]], by_key: dict[str, Not
     reachable from INDEX, which is the only thing either of them is for.
     """
     return sorted(k for k in inbound.get(key, ()) if k in by_key and by_key[k].type == "moc")
+
+
+#: How each note type is drawn. Shape carries the type so a reader can tell a
+#: claim from its source without following the legend on every node.
+MERMAID_SHAPES = {
+    "permanent": ('["', '"]'),
+    "literature": ('("', '")'),
+    "reference": ('[("', '")]'),
+    "moc": ('{{"', '"}}'),
+    "fleeting": ('>"', '"]'),
+}
+_DEFAULT_SHAPE = ('["', '"]')
+
+#: Mermaid reads these as syntax inside a label even when the label is quoted,
+#: so they go in as HTML entities. Order matters only in that `"` must be
+#: handled like the rest -- there is no escape character to double up.
+_MERMAID_ESCAPES = {
+    '"': "#quot;", "[": "#91;", "]": "#93;", "(": "#40;", ")": "#41;",
+    "{": "#123;", "}": "#125;", "<": "#60;", ">": "#62;", "|": "#124;",
+}
+
+
+def mermaid_label(text: str) -> str:
+    """A note title made safe to sit inside a quoted Mermaid label.
+
+    A title is free text -- it can contain quotes, brackets, or a pipe -- and
+    any of those ends the label early and produces a diagram that either fails
+    to parse or, worse, silently renders the wrong graph.
+    """
+    out = "".join(_MERMAID_ESCAPES.get(ch, ch) for ch in str(text))
+    return " ".join(out.split())
+
+
+def render_mermaid(node_types: dict[str, str], titles: dict[str, str],
+                   edges) -> str:
+    """The subgraph as Mermaid source, deterministically.
+
+    Node ids are synthetic (``n0``, ``n1`` ...) and assigned in sorted-key
+    order: a note key contains ``--``, which Mermaid can read as the start of an
+    edge inside an identifier. The key still appears in the label, because a
+    diagram a reader cannot look notes up from is decoration.
+
+    Nothing here reads a clock or a score, so the same repo and query always
+    produce byte-identical output.
+    """
+    keys = sorted(node_types)
+    if not keys:
+        return "graph LR\n  %% no notes matched"
+    ids = {key: f"n{i}" for i, key in enumerate(keys)}
+    lines = ["graph LR",
+             "  %% permanent [claim] · literature (summary) · reference [(source)] · "
+             "moc {{map}} · fleeting >note]"]
+    for key in keys:
+        open_, close = MERMAID_SHAPES.get(node_types[key], _DEFAULT_SHAPE)
+        label = f"{mermaid_label(titles.get(key, key))}<br/>{mermaid_label(key)}"
+        lines.append(f"  {ids[key]}{open_}{label}{close}")
+    for edge in sorted(edges):
+        if edge.source not in ids or edge.target not in ids:
+            continue
+        # A dotted arrow for a prose mention, a solid one for a curated
+        # relation: the eye should be able to tell them apart at a glance.
+        arrow = "-.->" if edge.relation == MENTIONS else "-->"
+        lines.append(f'  {ids[edge.source]} {arrow}|"{mermaid_label(edge.relation)}"| '
+                     f'{ids[edge.target]}')
+    return "\n".join(lines)

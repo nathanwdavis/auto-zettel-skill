@@ -15,7 +15,7 @@ TF-IDF the serendipity sweep uses (``zettel_lib.similarity``), applied query
 vs. note instead of note vs. note; titles and tags are weighted above bodies
 because a permanent note's title is its claim.
 
-    query.py --repo <path> "<query>" [--top N] [--json] [--file-gaps]
+    query.py --repo <path> "<query>" [--top N] [--json] [--mermaid] [--file-gaps]
 
 A query is not an operation, so nothing is appended to log.md (A9). The one
 exception is explicit: ``--file-gaps`` turns the report's suggested
@@ -122,6 +122,13 @@ def query(repo: ContentRepo, text: str, top: int = 15) -> dict:
            if e.target in subgraph_keys})
     moc_membership = {k: graph.moc_membership(k, inbound, by_key)
                       for k in sorted(subgraph_keys)}
+    # Always rendered, like every other field: the report's shape does not
+    # change with the flags. --mermaid decides whether the HUMAN report shows
+    # the diagram, not whether the JSON carries it.
+    mermaid = graph.render_mermaid(
+        {k: by_key[k].type for k in subgraph_keys},
+        {k: by_key[k].title for k in subgraph_keys},
+        edges)
 
     # Inquiries are questions about the graph, not nodes in it: match them
     # separately so "already asked" is visible next to "already answered".
@@ -196,6 +203,7 @@ def query(repo: ContentRepo, text: str, top: int = 15) -> dict:
         "edges": [{"source": e.source, "target": e.target, "relation": e.relation}
                   for e in edges],
         "moc_membership": moc_membership,
+        "mermaid": mermaid,
         "inquiries": inquiries,
         "topics": touched_topics,
         "gaps": gaps,
@@ -228,7 +236,7 @@ def file_gaps(repo: ContentRepo, report: dict) -> list[dict]:
     return filed
 
 
-def render(report: dict, repo_path: str) -> str:
+def render(report: dict, repo_path: str, mermaid: bool = False) -> str:
     out = [f"# What the base knows about: \"{report['query']}\"", ""]
     counts = ", ".join(f"{t} {n}" for t, n in report["by_type"].items() if n)
     out.append(f"Matched {len(report['matched'])} of {report['note_count']} notes"
@@ -280,6 +288,14 @@ def render(report: dict, repo_path: str) -> str:
             report["connected"],
             lambda r: f"- {r['type']} **{r['title']}** -- `{r['key']}` (via `{r['via']}`)")
 
+    if mermaid:
+        out.append("## The subgraph")
+        out.append("")
+        out.append("```mermaid")
+        out.append(report["mermaid"])
+        out.append("```")
+        out.append("")
+
     out.append("## Gaps")
     for gap in report["gaps"]:
         out.append(f"- {gap}")
@@ -315,6 +331,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--top", type=int, default=15,
                         help="maximum matched notes to report (default 15)")
     parser.add_argument("--json", action="store_true", help="emit the report as JSON")
+    parser.add_argument("--mermaid", action="store_true",
+                        help="include a Mermaid diagram of the subgraph in the report "
+                             "(the JSON always carries it)")
     parser.add_argument("--file-gaps", action="store_true",
                         help="capture the suggested follow-ups (inquiries / INBOX entries) "
                              "through capture.py instead of only printing them")
@@ -333,7 +352,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
     else:
-        print(render(report, str(repo.root)))
+        print(render(report, str(repo.root), mermaid=args.mermaid))
     return EXIT_OK
 
 

@@ -184,6 +184,66 @@ def test_mentions_is_not_an_fr5_relation():
     assert MENTIONS not in RELATIONS
 
 
+def test_mermaid_is_a_section_not_a_mode(clean_repo):
+    """The diagram joins the report; it does not replace it."""
+    out = report(clean_repo, "atomic notes", "--mermaid").stdout
+    assert "# What the base knows about" in out
+    assert "## The subgraph" in out and "```mermaid" in out and "graph LR" in out
+    assert "## Gaps" in out
+
+
+def test_mermaid_is_absent_from_the_report_unless_asked(clean_repo):
+    out = report(clean_repo, "atomic notes").stdout
+    assert "```mermaid" not in out
+
+
+def test_json_always_carries_the_mermaid_source(clean_repo):
+    """The JSON shape does not change with the flags, like every other field."""
+    plain = json.loads(report(clean_repo, "atomic notes", "--json").stdout)
+    flagged = json.loads(report(clean_repo, "atomic notes", "--json", "--mermaid").stdout)
+    assert plain["mermaid"].startswith("graph LR")
+    assert plain["mermaid"] == flagged["mermaid"]
+
+
+def test_mermaid_is_byte_identical_across_runs(clean_repo):
+    a = report(clean_repo, "atomic notes", "--mermaid").stdout
+    b = report(clean_repo, "atomic notes", "--mermaid").stdout
+    assert a == b
+
+
+def test_mermaid_nodes_appear_in_sorted_key_order(clean_repo):
+    data = json.loads(report(clean_repo, "atomic notes", "--json").stdout)
+    ids = {}
+    for line in data["mermaid"].splitlines():
+        line = line.strip()
+        if not line.startswith("n") or "<br/>" not in line:
+            continue
+        node_id = line.split("[")[0].split("(")[0].split("{")[0].split(">")[0]
+        ids[node_id] = line.split("<br/>")[1].rstrip('")}]>')
+    assert list(ids) == sorted(ids, key=lambda n: int(n[1:]))
+    assert list(ids.values()) == sorted(ids.values())
+
+
+def test_mermaid_draws_mentions_differently_from_typed_relations(clean_repo):
+    """A curated relation and a passing mention must not look alike."""
+    data = json.loads(report(clean_repo, "atomic notes", "--json").stdout)
+    assert '-.->|"mentions"|' in data["mermaid"]
+    assert '-->|"source"|' in data["mermaid"]
+
+
+def test_mermaid_label_escapes_what_would_end_the_label_early():
+    import sys
+    sys.path.insert(0, str(SCRIPTS))
+    from zettel_lib.graph import mermaid_label
+    assert mermaid_label('A "quoted" [title]') == "A #quot;quoted#quot; #91;title#93;"
+    assert mermaid_label("keeps\n  one space") == "keeps one space"
+
+
+def test_mermaid_on_a_query_that_matches_nothing_is_still_valid(clean_repo):
+    data = json.loads(report(clean_repo, "quantum chromodynamics", "--json").stdout)
+    assert data["mermaid"] == "graph LR\n  %% no notes matched"
+
+
 def test_empty_query_is_a_usage_error(clean_repo):
     assert run_script("query.py", clean_repo, "   ").returncode == 2
 
