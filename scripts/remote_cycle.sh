@@ -9,7 +9,8 @@
 #
 # Subcommands:
 #   start   refresh this skill checkout, claim the lock, create the run branch
-#   finish  commit, push the branch, open a PR, enable auto-merge
+#   gates   run the merge gates exactly as CI will run them
+#   finish  gate, commit, push the branch, open a PR, enable auto-merge
 #   abort   release the lock, leave the branch for inspection
 #   status  report lock holder and current branch
 
@@ -25,15 +26,18 @@ case "${1:-}" in
   *) CMD="$1" ;;
 esac
 shift || true
-REPO=""; TTL="${STALE_LOCK_HOURS:-6}"; TITLE=""
+REPO=""; TTL="${STALE_LOCK_HOURS:-6}"; TITLE=""; NO_GATES=0; ONLINE=0; MAILTO=""; BASE=""
 
 usage() {
   cat <<'USAGE'
-Usage: remote_cycle.sh <start|finish|abort|status|refresh-skill> --repo <content-repo> [options]
+Usage: remote_cycle.sh <start|gates|finish|abort|status|refresh-skill> --repo <content-repo> [options]
 
   start   --repo <path> [--ttl <hours>]   refresh this skill checkout, claim
                                           lock, pull, create run branch
-  finish  --repo <path> [--title <text>]  commit, push branch, open PR, auto-merge
+  gates   --repo <path> [--online]        run the merge gates as CI runs them
+          [--mailto <email>] [--base <rev>]
+  finish  --repo <path> [--title <text>]  gate, commit, push branch, open PR,
+          [--no-gates]                    auto-merge
   abort   --repo <path>                   release the lock, keep the branch
   status  --repo <path>                   report lock holder and branch
   refresh-skill                           fast-forward this skill checkout itself
@@ -50,6 +54,10 @@ while [[ $# -gt 0 ]]; do
     --repo) REPO="${2:-}"; shift 2 ;;
     --ttl) TTL="${2:-}"; shift 2 ;;
     --title) TITLE="${2:-}"; shift 2 ;;
+    --no-gates) NO_GATES=1; shift ;;
+    --online) ONLINE=1; shift ;;
+    --mailto) MAILTO="${2:-}"; shift 2 ;;
+    --base) BASE="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; echo "error: unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -145,6 +153,58 @@ gitlock.release(Path(sys.argv[1]), reason=sys.argv[2])
 
 lockpy() { PYTHONPATH="$SCRIPT_DIR" "$PYBIN" -c "$1" "$REPO" "${@:2}"; }
 
+# The merge gates, in CI's order and with CI's arguments (ci/content-repo-gates.yml).
+# `finish` runs these BEFORE it commits, because the alternative was found by
+# use: a session pushed, its PR went red, and by the time CI said so the
+# session was gone -- leaving a branch nobody was left to fix. CI remains the
+# authority; this is the same list run early enough to act on.
+#
+# verify_refs runs --offline like CI's does: it re-checks what the run recorded
+# against the captures in raw/, so a gate can never pass on a lucky live lookup.
+# --online is for a session that wants the registry check before handing over.
+run_merge_gates() {
+  local failed=() rc=0 verify_args="--offline"
+  if [[ $ONLINE -eq 1 || -n "$MAILTO" ]]; then
+    verify_args="--mailto ${MAILTO:-${ZETTEL_MAILTO:-}}"
+    [[ -n "${MAILTO:-${ZETTEL_MAILTO:-}}" ]] || verify_args="--offline"
+  fi
+  # shellcheck disable=SC2086
+  PYTHONPATH="$SCRIPT_DIR" "$PYBIN" "$SCRIPT_DIR/verify_refs.py" --repo "$REPO" $verify_args \
+    || failed+=("verify_refs")
+  for gate in "build_manifest.py --check" "lint_citations.py" "lint_links.py" "lint_skills.py"; do
+    # shellcheck disable=SC2086
+    PYTHONPATH="$SCRIPT_DIR" "$PYBIN" "$SCRIPT_DIR/${gate%% *}" --repo "$REPO" ${gate#*.py} \
+      || failed+=("${gate%% *}")
+  done
+
+  # The sandbox gate needs a merge-base to diff against. A repo with no origin
+  # (a local scaffold, a test fixture) has none, and skipping is correct there:
+  # the invariants it checks are about what a CYCLE changed, and without a base
+  # there is no cycle to describe.
+  local base="$BASE"
+  if [[ -z "$base" ]]; then
+    local db; db="$(default_branch)"
+    git -C "$REPO" fetch -q origin "$db" 2>/dev/null || true
+    base="$(git -C "$REPO" merge-base "origin/$db" HEAD 2>/dev/null || true)"
+  fi
+  if [[ -n "$base" ]]; then
+    PYTHONPATH="$SCRIPT_DIR" "$PYBIN" "$SCRIPT_DIR/check_skill_sandbox.py" \
+      --repo "$REPO" --base "$base" || failed+=("check_skill_sandbox")
+  else
+    echo "gates: no merge-base with the default branch; skipping the sandbox check" >&2
+  fi
+
+  if [[ ${#failed[@]} -gt 0 ]]; then
+    echo "gates: FAIL (${failed[*]})" >&2
+    log "remote_cycle: gates FAIL (${failed[*]})"
+    rc=1
+  else
+    echo "gates: PASS"
+    log "remote_cycle: gates PASS"
+  fi
+  return $rc
+}
+
 case "$CMD" in
   status)
     lockpy '
@@ -156,6 +216,10 @@ info = gitlock.read(Path(sys.argv[1]))
 print(f"lock: {info.holder} (session {info.session}, {info.age_hours():.2f}h old)" if info else "lock: free")
 '
     echo "branch: $(git -C "$REPO" branch --show-current)"
+    ;;
+
+  gates)
+    run_merge_gates
     ;;
 
   start)
@@ -303,6 +367,31 @@ print("yes" if ok else f"no\t{holder.holder}\t{holder.session}\t{holder.age_hour
       git -C "$REPO" checkout -q -- log.md 2>/dev/null || true
       echo "this branch's work is already merged into $DEFAULT_BRANCH; nothing to push"
       exit 0
+    fi
+
+    # Gate BEFORE anything is logged as finished. The order here is exact and
+    # each step earns its place:
+    #
+    #   stage -> gate -> log the completion -> re-stage -> commit
+    #
+    # Staging first is what lets check_skill_sandbox see a new note at all (it
+    # diffs tracked paths). Gating before the log lines is what keeps log.md
+    # honest: a refused finish must not leave a "finish" line claiming a cycle
+    # completed that pushed nothing, and log.md is append-only, so a false line
+    # cannot be taken back. Re-staging last picks up both the gates' own
+    # PASS lines and the completion line, so the branch carries the record of
+    # the gates that passed on it.
+    git -C "$REPO" add -A
+    if [[ $NO_GATES -eq 0 ]]; then
+      if ! run_merge_gates; then
+        git -C "$REPO" reset -q
+        echo "error: gates failed; nothing committed or pushed -- fix the notes, never the gate." >&2
+        echo "re-run finish when they pass, or 'finish --no-gates' to hand the red state to CI deliberately." >&2
+        exit 1
+      fi
+    else
+      echo "gates skipped (--no-gates); CI decides" >&2
+      log "remote_cycle: gates SKIPPED (--no-gates)"
     fi
 
     # The completion line is logged BEFORE the commit so it actually lands on
