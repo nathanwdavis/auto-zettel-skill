@@ -59,27 +59,44 @@ CONFIG = {
 }
 
 
-def make_pdf(text: str, title: str = "", author: str = "") -> bytes:
-    """A minimal, valid single-page PDF whose text pypdf can extract.
-
-    Hand-assembled rather than generated with a library so the fixture is
-    byte-stable and needs nothing beyond the standard library to build.
-    """
-    lines = text.splitlines() or [""]
+def _page_stream(text: str) -> bytes:
     ops = ["BT", "/F1 12 Tf", "72 720 Td", "14 TL"]
-    for line in lines:
+    for line in text.splitlines() or [""]:
         esc = line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
         ops.append(f"({esc}) Tj T*")
     ops.append("ET")
-    stream = "\n".join(ops).encode("latin-1", "replace")
+    return "\n".join(ops).encode("latin-1", "replace")
+
+
+def make_pdf(text: str = "", title: str = "", author: str = "",
+             pages: list[str] | None = None) -> bytes:
+    """A minimal, valid PDF whose text pypdf can extract.
+
+    Hand-assembled rather than generated with a library so the fixture is
+    byte-stable and needs nothing beyond the standard library to build. Pass
+    ``pages`` for a multi-page document -- the ingest extracts every page and
+    marks it, so a single-page fixture cannot show that a late page survives
+    or that a late DOI is correctly ignored as another work's.
+    """
+    contents = list(pages) if pages is not None else [text]
+    # Object layout: 1 catalog, 2 pages tree, then per page a Page and its
+    # Contents stream, then the shared font, then optional /Info.
+    first_page_obj = 3
+    font_obj = first_page_obj + 2 * len(contents)
+    kids = " ".join(f"{first_page_obj + 2 * i} 0 R" for i in range(len(contents)))
     objs = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-         b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"),
-        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        f"<< /Type /Pages /Kids [{kids}] /Count {len(contents)} >>".encode(),
     ]
+    for i, page_text in enumerate(contents):
+        stream = _page_stream(page_text)
+        objs.append(
+            (f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+             f"/Resources << /Font << /F1 {font_obj} 0 R >> >> "
+             f"/Contents {first_page_obj + 2 * i + 1} 0 R >>").encode())
+        objs.append(b"<< /Length " + str(len(stream)).encode()
+                    + b" >>\nstream\n" + stream + b"\nendstream")
+    objs.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
     if title or author:
         objs.append(f"<< /Title ({title}) /Author ({author}) >>".encode("latin-1", "replace"))
     out = bytearray(b"%PDF-1.4\n")

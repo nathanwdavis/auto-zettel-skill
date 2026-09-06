@@ -42,7 +42,7 @@ from urllib.parse import quote, urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import capture
-from zettel_lib import http, naming
+from zettel_lib import http, naming, references
 from zettel_lib.cli import EXIT_OK, EXIT_USAGE, EXIT_VIOLATION, base_parser, open_repo
 from zettel_lib.frontmatter import FrontmatterError, Note
 from zettel_lib.repo import ContentRepo, ContentRepoError, dig
@@ -63,12 +63,9 @@ class FetchError(RuntimeError):
     """A fetch that produced nothing citable; the message is for the INBOX entry."""
 
 
-def find_reference(repo: ContentRepo, ref: str) -> Note:
-    ref = ref.strip()
-    for path in repo.note_paths(types=["reference"]):
-        if path.stem == ref or (naming.is_id(ref) and path.stem.endswith(f"--{ref}")):
-            return Note.load(path)
-    raise ContentRepoError(f"no reference note matches {ref!r}")
+#: Shared with `capture.py literature`, which resolves the same argument the
+#: same way -- two spellings of "which reference note is this?" would drift.
+find_reference = references.find_reference
 
 
 def visible_text(markup: str) -> str:

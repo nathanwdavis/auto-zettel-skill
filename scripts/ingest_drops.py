@@ -33,11 +33,9 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
-import re
 import shutil
 import sys
 from pathlib import Path
-from urllib.parse import quote
 
 import yaml
 
@@ -46,20 +44,36 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_manifest
 import capture
 import verify_refs
-from zettel_lib import citations, http, naming
+from zettel_lib import citations, http, references
 from zettel_lib.cli import EXIT_OK, EXIT_USAGE, EXIT_VIOLATION, base_parser, open_repo
-from zettel_lib.frontmatter import FrontmatterError, Note, dump
+from zettel_lib.frontmatter import FrontmatterError, Note
 from zettel_lib.repo import ContentRepo, ContentRepoError, dig, max_capture_mb
 
 DROP_DIR = "drop"
 SOURCE_EXTS = (".pdf", ".txt", ".md", ".html", ".htm")
 SKIP_NAMES = {".gitkeep", "README.md"}
 MARKERS = (".duplicate-of-", ".too-large.")
-DOI_RE = re.compile(r"\b(10\.\d{4,9}/[^\s\"<>)\]]+)", re.IGNORECASE)
-ARXIV_RE = re.compile(r"arxiv:\s*(\d{4}\.\d{4,5}(?:v\d+)?)", re.IGNORECASE)
-CROSSREF = "https://api.crossref.org/works/{doi}?mailto={mailto}"
-PAGES_TO_READ = 5
-JOURNAL_TYPES = {"journal-article", "proceedings-article", "book-chapter", "book", "monograph"}
+# The reference builder and its identity helpers are shared with
+# `capture.py reference` (zettel_lib/references.py); re-exported here because
+# this module's own tests and callers have always reached for them by name.
+DOI_RE = references.DOI_RE
+ARXIV_RE = references.ARXIV_RE
+CROSSREF = references.CROSSREF
+JOURNAL_TYPES = references.JOURNAL_TYPES
+crossref_csl = references.crossref_csl
+authors_from = references.authors_from
+first_line = references.first_line
+build_reference = references.build_reference
+
+#: Pages searched for the source's OWN identifier. The extraction now covers
+#: every page (a literature note needs late-page locators), but a DOI deep in
+#: a paper is nearly always a cited work's -- so identity stays on the front
+#: matter while the text does not.
+IDENTITY_PAGES = 5
+#: A scanned book can extract to tens of megabytes of text; the capture itself
+#: is already capped by fetch.max_capture_mb, but the .txt beside it is written
+#: by us and would otherwise be unbounded.
+MAX_EXTRACT_CHARS = 2_000_000
 
 
 def pending(repo: ContentRepo) -> list[Path]:
@@ -104,165 +118,27 @@ def extract(path: Path) -> tuple[str, dict, list[str]]:
                         "(identity from sidecar/filename only)"]
     try:
         reader = pypdf.PdfReader(str(path))
-        pages = [p.extract_text() or "" for p in reader.pages[:PAGES_TO_READ]]
-        meta = {}
+        pages = [p.extract_text() or "" for p in reader.pages]
+        meta = {"pages": len(pages)}
         info = reader.metadata or {}
         for key, field in (("/Title", "title"), ("/Author", "author")):
             value = str(info.get(key) or "").strip()
             if value:
                 meta[field] = value
-        return "\n".join(pages), meta, []
+        text = references.paginate(pages)
+        warnings = []
+        if len(text) > MAX_EXTRACT_CHARS:
+            text = text[:MAX_EXTRACT_CHARS]
+            warnings.append(f"{path.name}: extraction truncated at {MAX_EXTRACT_CHARS} "
+                            "characters; later pages are not in the .txt")
+        return text, meta, warnings
     except Exception as exc:  # noqa: BLE001 - any parse failure degrades alike
         return "", {}, [f"{path.name}: could not read PDF ({type(exc).__name__}: {exc})"]
 
 
 def find_identifiers(text: str, sidecar: dict) -> dict:
-    ids = {}
-    for field in ("doi", "isbn", "arxiv", "pmid", "url"):
-        value = str(sidecar.get(field) or "").strip()
-        if value:
-            ids[field] = value
-    if "doi" not in ids:
-        m = DOI_RE.search(text)
-        if m:
-            ids["doi"] = m.group(1).rstrip(".,;")
-    if "arxiv" not in ids:
-        m = ARXIV_RE.search(text)
-        if m:
-            ids["arxiv"] = m.group(1)
-    return ids
-
-
-def crossref_csl(doi: str, *, mailto: str, transport) -> dict | None:
-    """The CSL-shaped Crossref record for a DOI, or None on a miss.
-
-    Crossref's ``message`` already uses CSL-JSON field names, so this is a
-    projection onto the fields a reference note carries, not a translation.
-    NetworkUnavailable propagates so the caller can degrade (NFR-5).
-    """
-    data = http.get_json(CROSSREF.format(doi=quote(doi, safe="/"), mailto=quote(mailto)),
-                         transport=transport)
-    msg = (data or {}).get("message") or {}
-    if not msg.get("DOI"):
-        return None
-    out = {"DOI": msg["DOI"], "type": str(msg.get("type") or "article-journal")}
-    titles = msg.get("title") or []
-    if titles:
-        out["title"] = str(titles[0])
-    if isinstance(msg.get("author"), list):
-        out["author"] = [{k: a[k] for k in ("family", "given") if k in a}
-                         for a in msg["author"] if isinstance(a, dict)]
-    for field in ("issued", "container-title", "publisher", "volume", "issue", "page", "URL"):
-        value = msg.get(field)
-        if isinstance(value, list):
-            value = value[0] if value else None
-        if value:
-            out[field] = value
-    return out
-
-
-def authors_from(value) -> list[dict]:
-    """Sidecar/PDF authors as CSL author objects: 'Family, Given' or 'Given Family'."""
-    names = value if isinstance(value, list) else [n.strip() for n in str(value or "").split(";") if n.strip()]
-    out = []
-    for name in names:
-        if isinstance(name, dict):
-            out.append({k: str(v) for k, v in name.items() if k in ("family", "given", "literal")})
-            continue
-        name = str(name).strip()
-        if not name:
-            continue
-        if "," in name:
-            family, given = [part.strip() for part in name.split(",", 1)]
-        elif " " in name:
-            given, family = name.rsplit(" ", 1)
-        else:
-            family, given = name, ""
-        out.append({"family": family, "given": given} if given else {"family": family})
-    return out
-
-
-def first_line(text: str) -> str:
-    for line in text.splitlines():
-        line = line.strip()
-        if 8 <= len(line) <= 160 and not DOI_RE.search(line):
-            return line
-    return ""
-
-
-def build_reference(note_id: str, path: Path, sidecar: dict, extracted_meta: dict,
-                    text: str, ids: dict, enriched: dict | None) -> tuple[dict, str]:
-    """(frontmatter, title) for the reference note this drop becomes."""
-    enriched = enriched or {}
-    title = (str(sidecar.get("title") or "").strip() or str(enriched.get("title") or "").strip()
-             or extracted_meta.get("title", "") or first_line(text)
-             or path.stem.replace("-", " ").replace("_", " ").strip())
-    csl: dict = {"id": note_id, "type": str(sidecar.get("type") or enriched.get("type")
-                                             or ("book" if ids.get("isbn") else "article-journal")),
-                 "title": title}
-    authors = authors_from(sidecar.get("author") or sidecar.get("authors"))
-    if not authors and enriched.get("author"):
-        authors = enriched["author"]
-    if not authors and extracted_meta.get("author"):
-        authors = authors_from(extracted_meta["author"])
-    if authors:
-        csl["author"] = authors
-    year = sidecar.get("year")
-    if year:
-        csl["issued"] = {"date-parts": [[int(year)]]}
-    elif enriched.get("issued"):
-        csl["issued"] = enriched["issued"]
-    for field in ("container-title", "publisher", "volume", "issue", "page", "URL"):
-        if enriched.get(field):
-            csl[field] = enriched[field]
-    if ids.get("doi"):
-        csl["DOI"] = ids["doi"]
-    if ids.get("isbn"):
-        csl["ISBN"] = ids["isbn"]
-    if ids.get("arxiv"):
-        csl["arxiv"] = ids["arxiv"]
-    if ids.get("pmid"):
-        csl["PMID"] = ids["pmid"]
-    if ids.get("url"):
-        csl["URL"] = ids["url"]
-
-    tier = str(sidecar.get("source_tier") or "").strip()
-    if not tier:
-        tier = ("peer-reviewed" if (ids.get("doi") or enriched.get("type") in JOURNAL_TYPES)
-                else "reputable-secondary")
-    key = naming.make_key(title, note_id)
-    slug, _ = naming.split_key(key)
-    today = capture.now_date()
-    meta = {
-        "id": note_id, "key": key, "slug": slug, "aliases": [note_id],
-        "type": "reference", "title": title,
-        "tags": [str(t) for t in (sidecar.get("tags") or [])],
-        "source_tier": tier, "scripture": False,
-        "csl_json": csl,
-        "chicago_note": "", "chicago_bib": "", "citation_renderer": "pandoc",
-        "verification": {"method": "", "source": "", "verified": False, "date": ""},
-        "raw_capture": "",  # filled once the file is in place
-        "provenance": {"dropped_as": path.name, "sidecar": bool(sidecar),
-                       "ingested": today},
-        "links": [],
-        "created": today, "updated": today,
-    }
-    return meta, title
-
-
-def existing_identities(repo: ContentRepo) -> dict[str, str]:
-    """source identity -> reference key, for the duplicate check."""
-    out = {}
-    for path in repo.note_paths(types=["reference"]):
-        try:
-            note = Note.load(path)
-        except FrontmatterError:
-            continue
-        csl = note.meta.get("csl_json")
-        identity = citations.source_identity(csl if isinstance(csl, dict) else {})
-        if identity:
-            out[identity] = note.key
-    return out
+    """Identity from the sidecar, else from the source's own front pages."""
+    return references.find_identifiers(references.head_text(text, IDENTITY_PAGES), sidecar)
 
 
 def mark(path: Path, marker: str) -> Path:
@@ -275,12 +151,33 @@ def mark(path: Path, marker: str) -> Path:
     return target
 
 
+def discard(path: Path) -> None:
+    """Remove a copy this run made, and its generated sidecar."""
+    path.unlink(missing_ok=True)
+    sidecar_path(path).unlink(missing_ok=True)
+
+
 def ingest_one(repo: ContentRepo, path: Path, *, mailto: str, offline: bool,
-               transport, max_mb: float, identities: dict[str, str]) -> dict:
+               transport, max_mb: float, identities: dict[str, str],
+               owned_copy: bool = False) -> dict:
+    """Ingest one file from drop/.
+
+    ``owned_copy`` marks a file this run copied in itself (``--file``, a
+    session's attachment) rather than one a human committed. The difference is
+    what a refusal should leave behind: a committed drop is marked in place and
+    reported in INBOX, because a human handed it over and must be told why it
+    did not land. A copy is deleted and reported to the caller instead --
+    nothing was handed to a future run, and marking it would leave litter in
+    drop/ plus an INBOX entry about a file the repo never really had.
+    """
     rel = repo.rel(path)
     warnings: list[str] = []
     size_mb = path.stat().st_size / (1024 * 1024)
     if size_mb > max_mb:
+        if owned_copy:
+            discard(path)
+            return {"kind": "too-large", "file": rel, "marked": "", "size_mb": round(size_mb, 1),
+                    "warnings": warnings}
         marked = mark(path, ".too-large")
         capture.capture_inbox(
             repo, f"Dropped source too large: {path.name}",
@@ -305,11 +202,19 @@ def ingest_one(repo: ContentRepo, path: Path, *, mailto: str, offline: bool,
                             "sidecar/extracted metadata")
 
     note_id = capture.allocate_id(repo)
-    meta, title = build_reference(note_id, path, sidecar, extracted_meta, text, ids, enriched)
+    meta, title = references.build_reference(
+        note_id, sidecar, extracted_meta, text, ids, enriched,
+        fallback_title=path.stem.replace("-", " ").replace("_", " "),
+        provenance={"dropped_as": path.name, "sidecar": bool(sidecar),
+                    "ingested": capture.now_date()})
 
     identity = citations.source_identity(meta["csl_json"])
     if identity and identity in identities:
         dup = identities[identity]
+        if owned_copy:
+            discard(path)
+            return {"kind": "duplicate", "file": rel, "duplicate_of": dup,
+                    "marked": "", "warnings": warnings}
         marked = mark(path, f".duplicate-of-{dup}")
         capture.capture_inbox(
             repo, f"Dropped source duplicates an existing reference: {path.name}",
@@ -363,15 +268,23 @@ def ingest_one(repo: ContentRepo, path: Path, *, mailto: str, offline: bool,
 
 
 def ingest(repo: ContentRepo, *, mailto: str = "", offline: bool = False,
-           transport=http.requests_transport) -> list[dict]:
+           transport=http.requests_transport, only: list[Path] | None = None,
+           owned_copy: bool = False) -> list[dict]:
+    """Ingest what is waiting in drop/, or just the files named by ``only``.
+
+    ``only`` exists for the ``--file`` path: a session ingesting the source it
+    was just handed must not also sweep up drops a human committed for the next
+    scheduled cycle, whose INBOX entries would then land in someone else's PR.
+    """
     cfg = repo.config()
     max_mb = max_capture_mb(cfg)
     mailto = mailto or str(dig(cfg, "fetch.mailto") or "")
-    identities = existing_identities(repo)
+    identities = references.identities(repo)
     results = []
-    for path in pending(repo):
+    for path in (only if only is not None else pending(repo)):
         results.append(ingest_one(repo, path, mailto=mailto, offline=offline,
-                                  transport=transport, max_mb=max_mb, identities=identities))
+                                  transport=transport, max_mb=max_mb,
+                                  identities=identities, owned_copy=owned_copy))
     ingested = [r for r in results if r["kind"] == "ingested"]
     for r in ingested:
         # Verified on its capture and rendered right away, so the artifact is
@@ -379,14 +292,41 @@ def ingest(repo: ContentRepo, *, mailto: str = "", offline: bool = False,
         # after the run remembers to call verify_refs in step 8.
         note = Note.load(repo.root / "reference" / f"{r['key']}.md")
         result = verify_refs.verify_note(note, repo, offline=True, mailto="")
-        note.meta["verification"] = {"method": result.method, "source": result.source,
-                                     "verified": result.verified,
-                                     "date": verify_refs.now() if result.verified else ""}
+        references.apply_verification(note, result, when=verify_refs.now())
         verify_refs.rerender(note)
         note.save()
     if ingested:
         build_manifest.regenerate(repo)
     return results
+
+
+#: CLI flags that stand in for a sidecar file, so a session that was handed a
+#: source can name it in one command instead of writing YAML beside it.
+SIDECAR_FLAGS = ("title", "year", "doi", "isbn", "arxiv", "pmid", "url",
+                 "source_tier", "priority", "notes")
+
+
+def stage_file(repo: ContentRepo, source: Path, fields: dict) -> Path:
+    """Copy an external source into drop/ so the normal ingest can run on it.
+
+    A copy, never a move: the file belongs to whoever handed it over (a session
+    attachment, a path in the user's home) and this tool has no business
+    consuming it. Everything downstream is then identical to a committed drop,
+    which is the point -- one ingest path, not two.
+    """
+    if not source.is_file():
+        raise ContentRepoError(f"not a file: {source}")
+    drop = repo.root / DROP_DIR
+    drop.mkdir(exist_ok=True)
+    target = drop / source.name
+    if target.exists():
+        raise ContentRepoError(
+            f"drop/{source.name} already exists; rename the file or ingest what is pending first")
+    shutil.copy2(source, target)
+    if fields:
+        sidecar_path(target).write_text(yaml.safe_dump(fields, sort_keys=False), encoding="utf-8")
+    repo.append_log(f"ingest_drops: --file {source} staged as {repo.rel(target)}")
+    return target
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -398,8 +338,35 @@ def main(argv: list[str] | None = None) -> int:
                         help="contact email for Crossref (default: config fetch.mailto)")
     parser.add_argument("--offline", action="store_true",
                         help="skip the Crossref enrichment lookup")
+    parser.add_argument("--file", type=Path,
+                        help="an external source file to copy into drop/ and ingest now "
+                             "(a session attachment); only that file is ingested")
+    parser.add_argument("--title", default="", help="sidecar field (with --file)")
+    parser.add_argument("--author", action="append", default=[],
+                        help="sidecar field, repeatable (with --file)")
+    parser.add_argument("--year", default="", help="sidecar field (with --file)")
+    parser.add_argument("--doi", default="", help="sidecar field (with --file)")
+    parser.add_argument("--isbn", default="", help="sidecar field (with --file)")
+    parser.add_argument("--arxiv", default="", help="sidecar field (with --file)")
+    parser.add_argument("--pmid", default="", help="sidecar field (with --file)")
+    parser.add_argument("--url", default="", help="sidecar field (with --file)")
+    parser.add_argument("--source-tier", default="", help="sidecar field (with --file)")
+    parser.add_argument("--priority", default="", help="sidecar field (with --file)")
+    parser.add_argument("--notes", default="", help="sidecar field (with --file)")
+    parser.add_argument("--tags", default="", help="comma-separated sidecar tags (with --file)")
     args = parser.parse_args(argv)
     repo = open_repo(args.repo)
+
+    fields = {name: getattr(args, name) for name in SIDECAR_FLAGS
+              if str(getattr(args, name) or "").strip()}
+    if args.author:
+        fields["author"] = args.author
+    if args.tags.strip():
+        fields["tags"] = [t.strip() for t in args.tags.split(",") if t.strip()]
+    if fields and not args.file:
+        print("error: sidecar flags describe a --file; without it, put a <stem>.yml "
+              "beside the file in drop/", file=sys.stderr)
+        return EXIT_USAGE
 
     if args.list:
         files = [repo.rel(p) for p in pending(repo)]
@@ -408,7 +375,12 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_OK
 
     try:
-        results = ingest(repo, mailto=args.mailto, offline=args.offline)
+        if args.file:
+            staged = stage_file(repo, args.file, fields)
+            results = ingest(repo, mailto=args.mailto, offline=args.offline,
+                             only=[staged], owned_copy=True)
+        else:
+            results = ingest(repo, mailto=args.mailto, offline=args.offline)
     except (ContentRepoError, FrontmatterError, OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         repo.append_log(f"ingest_drops: FAILED {exc}")
@@ -426,7 +398,15 @@ def main(argv: list[str] | None = None) -> int:
             if r["kind"] == "ingested":
                 print(f"ingested\t{r['file']}\t{r['key']}\t{r['capture']}")
             else:
-                print(f"{r['kind']}\t{r['file']}\t{r['marked']}")
+                print(f"{r['kind']}\t{r['file']}\t{r['marked'] or '(discarded)'}")
+    # A --file caller asked for ONE source and needs to know whether it landed;
+    # a sweep of drop/ is reporting on other people's files and stays exit 0.
+    if args.file and results and results[0]["kind"] != "ingested":
+        r = results[0]
+        detail = (f"duplicate of {r['duplicate_of']}" if r["kind"] == "duplicate"
+                  else f"{r.get('size_mb', '?')} MB exceeds fetch.max_capture_mb")
+        print(f"error: {args.file.name} was not ingested: {detail}", file=sys.stderr)
+        return EXIT_VIOLATION
     return EXIT_OK
 
 
