@@ -3,7 +3,7 @@
 **Source of truth:** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (all FR-x / AC-x / NFR-x / QA-x / checklist references below point there). Deviations forced by implementation are recorded there as numbered amendments — **A1–A11** so far.
 **Working on this repo:** [`.claude/CLAUDE.md`](.claude/CLAUDE.md) — how to run the suite, the environment's sharp edges, and the conventions.
 **This repo:** the skill repo. It contains ONLY the `zettel-bootstrap` plugin — never zettelkasten content. The content repo is created at genesis runtime by `init_content_repo.sh` and is out of scope for this repo's file tree. Both repos are public (A4); nothing here may contain a secret (NFR-4).
-**Status:** All phases complete — 1, 2, 3, 3.5, 3.6 (PR #5), 4 (PR #6) — plus two rounds of field fixes from live scheduled runs: issue #7 → PR #8 (amendment A8), and the stale-install/frozen-prompt round → PR #10. Every §12 checklist item passes. What remains is operational, not code: see **Handoff — next steps** at the end of §2.
+**Status:** All phases complete — 1, 2, 3, 3.5, 3.6 (PR #5), 4 (PR #6) — plus two rounds of field fixes from live scheduled runs: issue #7 → PR #8 (amendment A8), and the stale-install/frozen-prompt round → PR #10. Every §12 checklist item passes. **Round 8 (session flows, three phases) is planned, not started** — see its section in §2. What else remains is operational, not code: see **Handoff — next steps** at the end of §2.
 
 ---
 
@@ -351,6 +351,102 @@ ingest matrix (sidecar / DOI-in-text / no identifier / duplicate / oversize /
 no pypdf / sandbox gate on the move); `start` and the wrapper ingest a drop;
 OA lookup is enrichment (an unreachable OA registry never blocks Crossref);
 a shell with `renderer: none` is never saved.
+
+### Post-Phase-4 round 8 — session flows, by layer  📋 planned
+*Amendment A12 (to be appended when Phase 2 ships). Exit gate: each of the
+three session use cases runs end to end from one slash command with no
+hand-written frontmatter and no hand-sequenced lock/branch/gate steps.*
+
+A second walkthrough of the three interactive use cases -- ingest a source
+handed to a session, map the graph around a question and file its gaps, answer
+a question now -- found that each still leaves the session hand-authoring
+frontmatter (reference notes from `templates/reference.md`, inquiry
+`status`/`result_notes` edits) or hand-sequencing lock → branch → gates → PR.
+`finish` pushes without running the gates, so a red ad-hoc PR sits unmerged
+after the session is gone; the drop ingester reads only the first five pages
+of a PDF with no page markers, so nothing can mine passages or cite locators
+from the extraction; `query.py` emits grouped lists rather than a graph, and
+its gaps are unranked and filed all-or-nothing. The fix follows the standing
+rule -- generate well-formed artifacts rather than loosen a gate -- and lands
+in scripts, not prompts, so existing Routines pick it up.
+
+Decisions taken with the owner: slash commands are **sub-skills** under
+`skills/` (`zettel-ingest`, `zettel-query`, `zettel-ask`; six portable
+frontmatter fields only, FR-14; `/zettel-bootstrap:zettel-ingest` via the
+plugin or `/zettel-ingest` via the symlink route); phases are cut **by layer**
+so each ships green and is useful alone; **no quotation schema change** --
+quotes stay in permanent notes with a verified reference link, literature
+notes stay own-words, and passage mining yields candidates with page locators.
+
+**Phase 1 -- foundations**
+1. `capture.py` gains `reference` (from DOI/ISBN/arXiv/PMID/URL and/or
+   title/author/year; Crossref-enriched unless `--offline`; duplicate check
+   via `citations.source_identity`; Chicago strings rendered and
+   `verify_refs.verify_note` applied at creation, so it is gate-clean when an
+   identifier resolves and *honestly* `verified: false` otherwise),
+   `literature` (`--reference KEY --locator`), and `permanent`
+   (`--link KEY:relation`, relation validated against FR-5). The reference
+   builder moves out of `ingest_drops.py` into `zettel_lib/references.py` so
+   ingest and capture share one; `RELATIONS` moves to `zettel_lib/repo.py`.
+2. `capture.py inquiry-update KEY [--status] [--result-notes] [--note]`:
+   validates result notes resolve to **permanent** notes before writing,
+   refuses `answered` with none (AC-6), bumps `updated`, rebuilds the manifest
+   (which indexes inquiry status), logs. `inquiries.py` stays read-only (A9).
+3. `remote_cycle.sh gates` runs the CI list in CI order; `finish` stages, runs
+   it, and refuses to commit or push on red (`--no-gates` hands the red state
+   to CI deliberately; the lock stays held, `abort` releases).
+4. `ingest_drops.extract` reads every page and writes `--- page N ---` markers
+   into the `.txt`; identity search stays on the first five pages; the first
+   line heuristic skips markers; a character cap guards huge scans.
+5. `ingest_drops.py --file PATH` with sidecar fields as flags: copies an
+   external file (a session attachment) into `drop/` and ingests only it;
+   a duplicate deletes the copy and exits 1 rather than filing INBOX noise.
+
+**Phase 2 -- flows, entry point, sub-skills, docs**
+6. `scripts/session_cycle.sh <ask|ingest|query>`: one script owns lock,
+   branch, abort-on-error, and prints a rendered checklist per mode
+   (`session_*_prompt.md`, sed-rendered like the maintenance prompts).
+   `ask` = today's ad-hoc flow plus a coverage check via `query.py` first;
+   `ingest --source PATH` = start, `--file` ingest, then the writing recipe;
+   `query --from-query TEXT` = start **then** `query.py --file-gaps`, so the
+   captures land on the run branch. `adhoc_research.sh` becomes a thin
+   wrapper with its output/exit contract unchanged.
+7. `skills/zettel-ingest|zettel-query|zettel-ask/SKILL.md`, six fields only,
+   `$ARGUMENTS`, bodies routing into the scripts; root SKILL.md routing table
+   and sections updated (stays < 500 lines); `ci/setup-environment.sh` links
+   every `skills/*` dir.
+8. Agents and prompts use the generators (`researcher.md`, `synthesizer.md`,
+   `orchestrator.md`, both maintenance prompts' steps 8 and 10); README,
+   `references/{capture,note-types,quality-gates,query}.md`; amendment A12;
+   plugin version 0.2.0.
+
+**Phase 3 -- graph and gaps**
+9. `query.py --from-file PATH`: passage mode over a capture's `.txt` --
+   chunks by page marker and paragraph, each scored against the graph
+   (`same-claim` / `touches` / `none`), unmatched chunks listed as candidate
+   claims, and ready-made `capture.py literature|permanent` commands with
+   `p. N` locators. Read-only.
+10. `query.py` JSON gains `edges` (typed relations plus `mentions` for body
+    wikilinks) and `moc_membership`; `--mermaid` renders the subgraph.
+11. Gaps get stable ids and ranks; new kinds `unsummarised-reference`,
+    `weak-sourcing`, `orphan-claim`, `stale-inquiry`, and opt-in
+    `raw-mentions` (`--include-raw`); `--gaps N` caps; `--file-gaps g1,g3`
+    files a selection (bare `--file-gaps` still files all).
+
+**Must not change**: `start` stdout branch-only; the test-asserted `finish`
+literals; `query.py` writes nothing without `--file-gaps`; `gaps` stays a
+list of strings; six-field SKILL.md frontmatter; `capture.py` stdout and log
+prefix; the ad-hoc script's `branch:`/`inquiry:`/exit-code contract; agent
+tool lists and tiers; `raw/` immutability; never weaken a lint.
+
+**Tests to keep** (named per item in the working plan): generator schema +
+all-gates-green tests in `test_capture.py`; `test_inquiry_update.py`; gate
+refusal in `test_remote_cycle.py` (branch absent from origin, lock held);
+multi-page extraction and `--file` matrix in `test_ingest_drops.py`;
+`test_session_cycle.py`; `test_skills_frontmatter.py` (six fields, names
+match dirs, root < 500 lines, setup links every skill); passage mode, edges,
+Mermaid determinism, gap ids and selection in `test_query.py`. Smoke gains
+steps for each before the destructive `[4]` block.
 
 ### Handoff — next steps (operational, not code)
 
