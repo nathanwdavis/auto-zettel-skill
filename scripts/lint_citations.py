@@ -33,18 +33,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from zettel_lib import citations
 from zettel_lib.cli import EXIT_USAGE, Violation, base_parser, open_repo, report
 from zettel_lib.frontmatter import FrontmatterError, Note
-from zettel_lib.repo import ContentRepo, ContentRepoError, max_capture_mb
+from zettel_lib.graph import WIKILINK
+from zettel_lib.repo import (SOURCE_TIERS, STRONG_TIERS, WEAK_TIER, ContentRepo,
+                             ContentRepoError, max_capture_mb)
 
-WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]")
 CONTESTED_MIN_SOURCES = 3
 
-# QA-3 tiers, strongest first. Researchers may reach any source to *find* a
-# claim; a note grounded only in general web has been discovered but not yet
-# verified against a primary source. That is a normal, temporary state -- so it
-# warns rather than blocks.
-SOURCE_TIERS = ("peer-reviewed", "primary-text", "reputable-secondary", "general-web")
-STRONG_TIERS = {"peer-reviewed", "primary-text", "reputable-secondary"}
-WEAK_TIER = "general-web"
+# QA-3 tiers live in zettel_lib.repo beside RELATIONS: this lint warns on a
+# claim grounded only in the weak tier, capture.py refuses to write a tier
+# outside the set, and query.py reports the same weakness as a gap. Researchers
+# may reach any source to *find* a claim; a note grounded only in general web
+# has been discovered but not yet verified against a primary source. That is a
+# normal, temporary state -- so it warns rather than blocks.
 SCRIPTURE_TIER = "primary-text"
 
 #: The FR-4 reference-note fields a template writes and a hand-written note

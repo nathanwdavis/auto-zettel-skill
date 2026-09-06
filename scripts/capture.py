@@ -51,12 +51,11 @@ import verify_refs
 from zettel_lib import http, naming, references
 from zettel_lib.cli import EXIT_OK, EXIT_USAGE
 from zettel_lib.frontmatter import FrontmatterError, Note, dump
-from zettel_lib.repo import (INQUIRY_STATUSES, RELATIONS, ContentRepo,
+from zettel_lib.repo import (INQUIRY_STATUSES, RELATIONS, SOURCE_TIERS, ContentRepo,
                              ContentRepoError, dig)
 
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
 PRIORITIES = ("low", "normal", "high")
-SOURCE_TIERS = ("peer-reviewed", "primary-text", "reputable-secondary", "general-web")
 
 
 def now_date() -> str:

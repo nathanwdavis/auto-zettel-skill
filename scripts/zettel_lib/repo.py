@@ -26,6 +26,15 @@ RELATIONS = frozenset({
     "historical-connection", "elaborates", "refutes", "source",
 })
 
+#: The QA-3 source tiers, strongest first. Lives here for the same reason
+#: RELATIONS does: three entry points read them -- lint_citations (which warns
+#: on a claim grounded only in the weak tier), capture.py (which refuses to
+#: WRITE a tier outside the set), and query.py (whose `weak-sourcing` gap must
+#: be the SAME predicate the lint warns on, not a second one wearing the name).
+SOURCE_TIERS = ("peer-reviewed", "primary-text", "reputable-secondary", "general-web")
+STRONG_TIERS = frozenset({"peer-reviewed", "primary-text", "reputable-secondary"})
+WEAK_TIER = "general-web"
+
 #: Every FR-2 key, as dotted paths. The one list both maintenance paths
 #: validate against (AC-2): the laptop wrapper used to carry its own copy and
 #: the remote path had none, so a content repo missing `cadence` ran fine on

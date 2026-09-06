@@ -28,7 +28,6 @@ have it done. That IS an operation, and it logs like one.
 from __future__ import annotations
 
 import json
-import re
 import shlex
 import sys
 from pathlib import Path
@@ -36,12 +35,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import capture
-from zettel_lib import similarity
+from zettel_lib import graph, similarity
 from zettel_lib.cli import EXIT_OK, EXIT_USAGE, base_parser, open_repo
 from zettel_lib.frontmatter import FrontmatterError, Note
 from zettel_lib.repo import ContentRepo, ContentRepoError, dig
 
-WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]")
 TYPE_ORDER = ("permanent", "literature", "reference", "moc", "fleeting")
 #: A title is the claim and tags are the curated vocabulary; a body mentions
 #: many things in passing. Repeating them weights the vector accordingly.
@@ -64,18 +62,6 @@ def doc_text(note: Note) -> str:
     return "\n".join(parts)
 
 
-def neighbours(note: Note, keys: set[str], id_to_key: dict[str, str]) -> set[str]:
-    """Keys one link away (typed links and body wikilinks, bare ids resolved)."""
-    targets = {str(l.get("target_id", "")) for l in note.links}
-    targets |= {m.group(1).strip() for m in WIKILINK.finditer(note.body)}
-    out = set()
-    for t in targets:
-        resolved = t if t in keys else id_to_key.get(t)
-        if resolved:
-            out.add(resolved)
-    return out
-
-
 def query(repo: ContentRepo, text: str, top: int = 15) -> dict:
     notes, warnings = load_notes(repo)
     by_key = {n.key: n for n in notes if n.key}
@@ -88,16 +74,13 @@ def query(repo: ContentRepo, text: str, top: int = 15) -> dict:
 
     # Who cites whom, so a permanent note can show its sources and a
     # reference can show what rests on it.
-    inbound: dict[str, set[str]] = {k: set() for k in keys}
-    for n in by_key.values():
-        for target in neighbours(n, keys, id_to_key):
-            inbound[target].add(n.key)
+    inbound = graph.inbound_map(by_key.values(), keys, id_to_key)
 
     def describe(note: Note) -> dict:
         row = {"key": note.key, "type": note.type, "title": note.title,
                "path": repo.rel(note.path), "tags": note.tags}
         if note.type == "permanent":
-            row["sources"] = sorted(k for k in neighbours(note, keys, id_to_key)
+            row["sources"] = sorted(k for k in graph.neighbours(note, keys, id_to_key)
                                     if by_key[k].type == "reference")
         elif note.type == "literature":
             row["locator"] = str(note.meta.get("locator") or "")
@@ -120,7 +103,7 @@ def query(repo: ContentRepo, text: str, top: int = 15) -> dict:
     connected = []
     seen = set(hit_keys)
     for h in hits:
-        for k in sorted(neighbours(by_key[h.key], keys, id_to_key) | inbound[h.key]):
+        for k in sorted(graph.neighbours(by_key[h.key], keys, id_to_key) | inbound[h.key]):
             if k in seen:
                 continue
             seen.add(k)

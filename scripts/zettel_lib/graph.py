@@ -1,0 +1,108 @@
+"""The note link graph: one traversal, read the same way by every caller.
+
+Four entry points walk the same edges -- ``lint_links`` (which fails an
+unresolvable one), ``lint_citations`` (which follows them to a note's
+references), ``query.py`` (which reports neighbours and now the subgraph
+itself), and ``serendipity_sweep`` (which scores across them). Before this
+module the ``[[wikilink]]`` pattern was written out three times and the
+"typed links plus body wikilinks, bare ids resolved" walk four times. A graph
+read four slightly different ways is a graph nobody can reason about: the lint
+would pass a link the report never drew, or the reverse.
+
+So the pattern and the walk live here, once.
+
+Two edges are NOT the same fact and this module keeps them apart. A typed link
+is curated -- an author chose ``supports`` from the closed FR-5 set. A body
+wikilink is a mention in prose: real evidence of a connection, but nobody
+asserted a relation. ``out_edges`` returns both, labelled, and ``neighbours``
+flattens them for the callers that only need "what is one hop away".
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+from . import naming
+from .frontmatter import Note
+
+WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]")
+
+#: The relation label for a body wikilink. Deliberately OUTSIDE
+#: ``repo.RELATIONS``: it describes an edge the graph observed, not one an
+#: author asserted, and if it ever leaked into a note's ``links`` block
+#: ``lint_links`` would (correctly) fail it as ``bad-relation``.
+MENTIONS = "mentions"
+
+
+@dataclass(frozen=True, order=True)
+class Edge:
+    """One directed edge, with the relation that justifies it."""
+
+    source: str
+    target: str
+    relation: str
+
+
+def resolve(target: str, keys: set[str], id_to_key: dict[str, str]) -> str | None:
+    """Resolve a link target to a note key, accepting a bare timestamp ID."""
+    target = target.strip()
+    if target in keys:
+        return target
+    if naming.is_id(target) and target in id_to_key:
+        return id_to_key[target]
+    return None
+
+
+def out_edges(note: Note, keys: set[str], id_to_key: dict[str, str]) -> list[Edge]:
+    """Every resolvable edge leaving ``note``: typed links first, then mentions.
+
+    A target that is both typed-linked and wikilinked yields TWO edges. That is
+    not duplication -- a curated ``elaborates`` and a passing mention in prose
+    are different claims about the same pair, and collapsing them would lose
+    the distinction the whole module exists to keep.
+
+    Unresolvable targets are dropped rather than reported: this is the reader,
+    and ``lint_links`` is the gate that fails them.
+    """
+    edges: list[Edge] = []
+    for link in note.links:
+        target = resolve(str(link.get("target_id", "")), keys, id_to_key)
+        if target:
+            edges.append(Edge(note.key, target, str(link.get("relation", ""))))
+    for match in WIKILINK.finditer(note.body):
+        target = resolve(match.group(1), keys, id_to_key)
+        if target:
+            edges.append(Edge(note.key, target, MENTIONS))
+    return edges
+
+
+def neighbours(note: Note, keys: set[str], id_to_key: dict[str, str]) -> set[str]:
+    """Keys one link away, by any kind of edge."""
+    return {e.target for e in out_edges(note, keys, id_to_key)}
+
+
+def inbound_map(notes, keys: set[str], id_to_key: dict[str, str]) -> dict[str, set[str]]:
+    """For every key, the notes that link TO it.
+
+    Who cites whom: a permanent note can show its sources and a reference can
+    show what rests on it. Every key in ``keys`` is present, with an empty set
+    when nothing points at it -- callers ask about orphans, and a KeyError is
+    not an answer.
+    """
+    inbound: dict[str, set[str]] = {k: set() for k in keys}
+    for note in notes:
+        for edge in out_edges(note, keys, id_to_key):
+            inbound[edge.target].add(edge.source)
+    return inbound
+
+
+def moc_membership(key: str, inbound: dict[str, set[str]], by_key: dict[str, Note]) -> list[str]:
+    """The maps of content that reach ``key``, sorted.
+
+    One definition, because two things need it and they must agree: the JSON
+    field a session reads, and the gap that fires when a note is in no map at
+    all. Two implementations would eventually disagree about whether a note is
+    reachable from INDEX, which is the only thing either of them is for.
+    """
+    return sorted(k for k in inbound.get(key, ()) if k in by_key and by_key[k].type == "moc")
