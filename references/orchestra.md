@@ -19,6 +19,25 @@ maintenance prompt delegates to them by name).
 | note-maintainer | cheap | INBOX revisions, fleeting sweep, link repair | deletes knowledge on its own judgment |
 | skill-smith | strong | ≤1 child-skill proposal per cycle, under content-repo `skills/` only | touches the skill repo; re-proposes rejections |
 
+## Every agent authors through a generator
+
+No agent writes a note file by hand. The researcher creates reference and
+literature notes with `capture.py reference|literature`, the synthesizer writes
+claims with `capture.py permanent`, and inquiry statuses move through
+`capture.py inquiry-update`. Each refuses at write time exactly what the lints
+refuse at gate time — a second reference note for a source already on file, a
+relation outside the FR-5 taxonomy, an unresolvable link target, a literature
+note with no locator, an inquiry answered with nothing to point at.
+
+This is the same invariant `capture.py` was built for, applied to the pipeline's
+own highest-volume authors: the gates demand exact frontmatter, and a
+hand-written note fails the manifest build for whoever runs *next* rather than
+for its author. `templates/` remains the reference for what each note type
+carries; it is no longer the way to write one.
+
+The orchestrator plans against `query.py --json`, which names each gap and the
+role it needs, and is read-only and free (A9).
+
 ## Model tiers (AC-29)
 
 The `.md` files declare tier **defaults** as aliases (`opus` = strong,

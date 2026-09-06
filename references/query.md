@@ -2,7 +2,7 @@
 
 `scripts/query.py` answers one question — *what does this base already have
 on X?* — and changes nothing while doing it. It exists because the other
-seventeen entry points either grow the repository or gate it, and a session
+twenty-one entry points either grow the repository or gate it, and a session
 asked "what do we know about X" would otherwise reach for the researcher.
 Growing the base is a cycle's job, behind the lock and the gates; mapping it
 is not.

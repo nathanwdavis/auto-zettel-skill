@@ -378,7 +378,7 @@ so each ships green and is useful alone; **no quotation schema change** --
 quotes stay in permanent notes with a verified reference link, literature
 notes stay own-words, and passage mining yields candidates with page locators.
 
-**Phase 1 -- foundations  ✅ shipped** (479 tests, smoke exit 0, strict validate clean)
+**Phase 1 -- foundations  ✅ shipped** (480 tests, smoke exit 0, strict validate clean)
 1. `capture.py` gains `reference` (from DOI/ISBN/arXiv/PMID/URL and/or
    title/author/year; Crossref-enriched unless `--offline`; duplicate check
    via `citations.source_identity`; Chicago strings rendered and
@@ -419,7 +419,7 @@ What Phase 1 taught, kept for whoever builds on it:
   from inside the content repo, so a relative interpreter path dies with exit
   127 several steps later, where it looks like a stub-binary problem.
 
-**Phase 2 -- flows, entry point, sub-skills, docs  ✅ shipped** (504 tests, smoke exit 0, strict validate clean)
+**Phase 2 -- flows, entry point, sub-skills, docs  ✅ shipped** (537 tests, smoke exit 0, strict validate clean)
 6. `scripts/session_cycle.sh <ask|ingest|query>`: one script owns lock,
    branch, abort-on-error, and prints a rendered checklist per mode
    (`session_*_prompt.md`, sed-rendered like the maintenance prompts).
@@ -489,7 +489,7 @@ steps for each before the destructive `[4]` block.
 
 ### Handoff — next steps (operational, not code)
 
-The plugin code is done and green (421 tests, smoke exit 0, strict validate).
+The plugin code is done and green (537 tests, smoke exit 0, strict validate).
 What remains happens in the *environment* and the *content repo*, not here.
 
 **Done** (2026-09-01): the content repo's GitHub settings are now set —
@@ -546,7 +546,7 @@ agent holds the lock and is already mid-merge.
 
 ## 3. Testing & definition of done
 
-The §12 checklist is the definition of done, run before final commit of each phase and in full before v1. `smoke_test.sh` orchestrates every item that works without network or `gh`; the pytest suite currently stands at **421 tests**.
+The §12 checklist is the definition of done, run before final commit of each phase and in full before v1. `smoke_test.sh` orchestrates every item that works without network or `gh`; the pytest suite currently stands at **537 tests**.
 
 Fixtures are **built programmatically** in `tests/conftest.py`, not checked in as static files, so every violation fixture is provably "the clean repo with exactly one thing broken" and the reference note's Chicago strings stay self-consistent with its CSL-JSON.
 

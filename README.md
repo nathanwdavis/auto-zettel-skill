@@ -328,11 +328,13 @@ creation — rewording a note's `title` never moves the file or breaks a link.
 
 ```
 .claude-plugin/plugin.json   plugin manifest
-skills/zettel-bootstrap/     SKILL.md (entry point)
+skills/zettel-bootstrap/     SKILL.md (the router)
+skills/zettel-{ingest,query,ask}/   one sub-skill per session flow (slash commands)
 references/                  architecture, note types, citation rules
 templates/                   note, config, and child-skill templates
 agents/                      the 8 subagent definitions
-scripts/                     genesis, capture, drop ingest, fetch, query, maintenance, manifest, verification, lints
+scripts/                     genesis, capture + note generators, drop ingest, fetch,
+                             query, session flows, maintenance, manifest, verification, lints
   zettel_lib/                shared library (see note below)
   csl/                       bundled Chicago style + provenance
 ci/                          content-repo gate workflow + cloud env setup
@@ -345,7 +347,7 @@ PLAN.md                      phase status and build order
 `scripts/zettel_lib/` is an addition to the layout the spec prescribes: the
 Python entry points share frontmatter parsing, note naming, repo access, HTTP,
 citation rendering, reference building, similarity scoring, and the git lock,
-and duplicating those across twenty entry points would guarantee they drift.
+and duplicating those across twenty-one entry points would guarantee they drift.
 
 ## Working on the skill itself
 
@@ -360,7 +362,7 @@ pip install -r requirements-dev.txt
 ./smoke_test.sh
 ```
 
-`smoke_test.sh` runs the full pytest suite (479 tests) plus an end-to-end
+`smoke_test.sh` runs the full pytest suite (537 tests) plus an end-to-end
 genesis scaffold. To run pytest alone, use the virtualenv's interpreter —
 `pytest` is generally not installed in the system python:
 
