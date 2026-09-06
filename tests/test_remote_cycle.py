@@ -562,3 +562,138 @@ def test_help_and_bad_subcommand(content_repo):
     assert cycle(repo, "frobnicate").returncode == 2
     assert subprocess.run([str(SCRIPT), "start"], capture_output=True,
                           text=True).returncode == 2
+
+
+# --- the merge gates, run before the push (A12) --------------------------------
+# A session that pushed a red branch and ended was leaving a PR nobody was left
+# to fix: CI reported the failure minutes later, into an empty room. `finish`
+# now runs the same gates CI will run, early enough for the session to act on
+# them. CI is still the authority -- this only moves the finding forward.
+
+def test_gates_pass_on_a_clean_repo_and_log_once(content_repo):
+    repo, _ = content_repo
+    result = cycle(repo, "gates")
+    assert result.returncode == 0, result.stderr
+    assert "gates: PASS" in result.stdout
+    log = (repo / "log.md").read_text(encoding="utf-8")
+    assert log.count("remote_cycle: gates PASS") == 1
+
+
+def test_gates_report_violations_and_exit_1(content_repo):
+    repo, _ = content_repo
+    inquiry = repo / "inquiries" / "unanswerable--202608301400.md"
+    inquiry.parent.mkdir(exist_ok=True)
+    inquiry.write_text(
+        "---\nid: '202608301400'\nkey: unanswerable--202608301400\n"
+        "slug: unanswerable\naliases: ['202608301400']\ntype: inquiry\n"
+        "question: Does a closed question need an answer?\nstatus: answered\n"
+        "priority: normal\nasked_by: human\nresult_notes: []\n"
+        "created: '2026-08-30'\nupdated: '2026-08-30'\n---\n\nBody.\n",
+        encoding="utf-8")
+    result = cycle(repo, "gates")
+    assert result.returncode == 1
+    assert "unanswered-answer" in result.stdout
+    assert "gates: FAIL" in result.stderr and "lint_links" in result.stderr
+
+
+def test_gates_skip_the_sandbox_check_without_a_merge_base(tmp_path):
+    """A scaffold with no origin has no cycle to describe, so nothing to check."""
+    repo = build_clean_repo(tmp_path / "kb")
+    subprocess.run(["git", "-C", str(repo), "init", "-q", "-b", "main"], check=True)
+    result = cycle(repo, "gates")
+    assert result.returncode == 0
+    assert "skipping the sandbox check" in result.stderr
+
+
+def test_finish_refuses_to_push_when_a_gate_fails(content_repo):
+    repo, origin = content_repo
+    assert cycle(repo, "start").returncode == 0
+    branch = current_branch(repo)
+    (repo / "fleeting" / "hand-written.md").write_text(
+        "no frontmatter here, just prose\n", encoding="utf-8")
+
+    result = cycle(repo, "finish", "--title", "Should not land")
+    assert result.returncode == 1
+    assert "gates failed" in result.stderr and "never the gate" in result.stderr
+    assert branch not in branches_on(origin), "a red branch is not pushed"
+    assert gitlock.read(repo) is not None, "the lock stays held; the session still owns the cycle"
+    staged = subprocess.run(["git", "-C", str(repo), "diff", "--cached", "--name-only"],
+                            capture_output=True, text=True).stdout
+    assert staged.strip() == "", "a refused finish leaves nothing staged"
+
+
+def test_finish_after_fixing_the_gate_failure_pushes(content_repo):
+    repo, origin = content_repo
+    assert cycle(repo, "start").returncode == 0
+    branch = current_branch(repo)
+    bad = repo / "fleeting" / "hand-written.md"
+    bad.write_text("no frontmatter\n", encoding="utf-8")
+    assert cycle(repo, "finish").returncode == 1
+    bad.unlink()
+    (repo / "INBOX.md").write_text("# Inbox\n\nReal work.\n", encoding="utf-8")
+    result = cycle(repo, "finish", "--title", "Now it lands")
+    assert result.returncode == 0, result.stderr
+    assert branch in branches_on(origin)
+
+
+def test_finish_no_gates_hands_the_red_state_to_ci(content_repo):
+    """The deliberate escape: CI is still the authority, so it may decide."""
+    repo, origin = content_repo
+    assert cycle(repo, "start").returncode == 0
+    branch = current_branch(repo)
+    (repo / "fleeting" / "hand-written.md").write_text("no frontmatter\n", encoding="utf-8")
+    result = cycle(repo, "finish", "--no-gates", "--title", "CI decides")
+    assert result.returncode == 0, result.stderr
+    assert branch in branches_on(origin)
+    assert "gates skipped" in result.stderr
+    assert "gates SKIPPED" in (repo / "log.md").read_text(encoding="utf-8")
+
+
+def test_finish_empty_cycle_runs_no_gates(content_repo):
+    """Nothing changed, so there is nothing to gate -- and nothing to push."""
+    repo, _ = content_repo
+    assert cycle(repo, "start").returncode == 0
+    result = cycle(repo, "finish")
+    assert result.returncode == 0
+    assert "no changes" in result.stdout
+    assert "remote_cycle: gates" not in (repo / "log.md").read_text(encoding="utf-8")
+
+
+def test_finish_gates_see_new_untracked_files(content_repo):
+    """Staging happens before the gates, or a new note is invisible to them."""
+    repo, origin = content_repo
+    assert cycle(repo, "start").returncode == 0
+    branch = current_branch(repo)
+    (repo / "permanent" / "orphan--202608301500.md").write_text(
+        "---\nid: '202608301500'\nkey: orphan--202608301500\nslug: orphan\n"
+        "aliases: ['202608301500']\ntype: permanent\ntitle: An orphan claim\n"
+        "tags: []\nlinks: []\ncreated: '2026-08-30'\nupdated: '2026-08-30'\n---\n\nBody.\n",
+        encoding="utf-8")
+    result = cycle(repo, "finish", "--title", "Should not land")
+    assert result.returncode == 1
+    assert "atomicity" in result.stdout, "the new file was gated, not skipped"
+    assert branch not in branches_on(origin)
+
+
+def test_finish_commits_the_gates_own_log_lines(content_repo):
+    """The gates append PASS lines; the commit must carry them or the audit lies."""
+    repo, _ = content_repo
+    assert cycle(repo, "start").returncode == 0
+    (repo / "INBOX.md").write_text("# Inbox\n\nWork.\n", encoding="utf-8")
+    assert cycle(repo, "finish", "--title", "Gated").returncode == 0
+    committed = subprocess.run(["git", "-C", str(repo), "show", "HEAD:log.md"],
+                               capture_output=True, text=True, check=True).stdout
+    assert "remote_cycle: gates PASS" in committed
+    assert committed == (repo / "log.md").read_text(encoding="utf-8")
+
+
+def test_a_refused_finish_leaves_no_finish_line_in_the_log(content_repo):
+    """log.md is append-only, so a false 'finish' line can never be taken back."""
+    repo, _ = content_repo
+    assert cycle(repo, "start").returncode == 0
+    (repo / "fleeting" / "broken.md").write_text("no frontmatter\n", encoding="utf-8")
+    assert cycle(repo, "finish", "--title", "Nope").returncode == 1
+    log = (repo / "log.md").read_text(encoding="utf-8")
+    assert "remote_cycle: finish" not in log
+    assert "must be opened by the session" not in log
+    assert "remote_cycle: gates FAIL" in log, "the refusal itself is still recorded"

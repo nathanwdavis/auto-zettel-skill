@@ -44,9 +44,20 @@ Anything outside the taxonomy, or a target absent from the manifest, fails
 
 ## The types
 
+> **Create every note with a generator, not by hand.** `capture.py` has a kind
+> per type (`reference`, `literature`, `permanent`, plus `fleeting` and
+> `inquiry`); each refuses at write time what the lints refuse at gate time.
+> The templates below describe the shape the generators produce — read them to
+> understand a note, reach for `capture.py` to write one.
+
 ### permanent
 One atomic idea. The title states a **claim**, not a topic. At least one
-outbound typed link. Every sourced claim links to a *verified* reference note —
+outbound typed link.
+
+```sh
+scripts/capture.py --repo <repo> permanent "Atomic notes compound over time" \
+  --link how-to-take-smart-notes--202608301000:source
+``` Every sourced claim links to a *verified* reference note —
 `lint_citations.py` looks for attribution language ("argues", "shows that",
 quotation marks) and fails the note if nothing verified is linked.
 
@@ -58,14 +69,30 @@ are one source.
 
 ### literature
 An own-words summary of **exactly one** source, with a locator (page, section,
-timestamp). Links to exactly one reference note, and its `reference` field names
+timestamp).
+
+```sh
+scripts/capture.py --repo <repo> literature "Ahrens on the slip box" \
+  --reference how-to-take-smart-notes--202608301000 --locator "pp. 12-30"
+``` Links to exactly one reference note, and its `reference` field names
 that same note; `lint_links.py` fails an empty locator (`missing-locator`) and a
 disagreeing field (`reference-mismatch`). Never paste source prose here —
 verbatim text belongs in `raw/`.
 
 ### reference
 Exactly one per source — two notes sharing a DOI/ISBN/PMID/arXiv id/URL fail
-`duplicate-source`. Carries `csl_json`, the rendered `chicago_note` and
+`duplicate-source`, and `capture.py reference` refuses to write the second one
+in the first place, naming the note already on file.
+
+```sh
+scripts/capture.py --repo <repo> reference --doi 10.48550/arXiv.2608.27454
+```
+
+It enriches from Crossref, renders the Chicago strings, and verifies through
+the same `verify_refs` the gate uses — so a note with a resolvable identifier
+is gate-clean the moment it exists. Without one it stays honestly
+`verified: false`; capture the source with `fetch_source.py` rather than
+editing the verification block. Carries `csl_json`, the rendered `chicago_note` and
 `chicago_bib`, `source_tier` (one of four values), a `verification` block with
 all four keys, and `raw_capture`; a missing field is `missing-field`. The
 Chicago strings are generated — never hand-written. See `citation-rules.md`.

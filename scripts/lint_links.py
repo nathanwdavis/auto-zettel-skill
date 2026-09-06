@@ -24,12 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from zettel_lib import naming
 from zettel_lib.cli import EXIT_USAGE, Violation, base_parser, open_repo, report
 from zettel_lib.frontmatter import FrontmatterError, Note
-from zettel_lib.repo import INQUIRY_STATUSES, ContentRepo, ContentRepoError
-
-RELATIONS = {
-    "supports", "contradicts", "analogous", "shared-concept",
-    "historical-connection", "elaborates", "refutes", "source",
-}
+from zettel_lib.repo import INQUIRY_STATUSES, RELATIONS, ContentRepo, ContentRepoError
 
 WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]")
 

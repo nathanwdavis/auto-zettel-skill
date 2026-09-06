@@ -38,6 +38,12 @@ INBOX entries ("Dropped source ready") name a reference note whose capture
 is in raw/. Work those first, from the capture (Read opens PDFs; the .txt
 beside it is the extraction), and never re-fetch them.
 
+Every note you write goes through a generator, never a hand-written file:
+`capture.py reference|literature|permanent` (and `fleeting`, `inquiry`,
+`inbox`). Each refuses at write time what the lints refuse at gate time, so a
+generated note cannot fail the gate it was written for. The `templates/` files
+describe what each type carries; they are not the way to write one.
+
 Step 3. First list the child skills the knowledge base has grown:
     {{PYTHON}} {{SCRIPTS}}/skill_review.py --repo {{REPO}} list
 and Read the SKILL.md of each `approved` skill relevant to the planned work —
@@ -84,10 +90,11 @@ human decision (FR-36; cheap-tier, 3 calls per question):
 
 Step 8. Run the gates yourself and fix what they find, re-running until clean
 or until nothing more can be fixed honestly:
-    {{PYTHON}} {{SCRIPTS}}/verify_refs.py --repo {{REPO}} {{VERIFY_ARGS}}
-    {{PYTHON}} {{SCRIPTS}}/lint_citations.py --repo {{REPO}}
-    {{PYTHON}} {{SCRIPTS}}/lint_links.py --repo {{REPO}}
-    {{PYTHON}} {{SCRIPTS}}/lint_skills.py --repo {{REPO}}
+    {{SCRIPTS}}/remote_cycle.sh gates --repo {{REPO}}
+That runs the whole list in the order CI runs it. (Individually, when you want
+to iterate on one: verify_refs.py {{VERIFY_ARGS}}, lint_citations.py,
+lint_links.py, lint_skills.py, all with --repo {{REPO}}.) `finish` re-runs
+them and refuses to push a red branch, so a failure here is yours to fix now.
 Never fix a lint by deleting knowledge, weakening a claim's sourcing, or
 marking something verified that is not. A `weak-sourcing` warning is not a
 failure — it means a claim was found but not yet traced to a primary source.
@@ -96,11 +103,15 @@ Note it in INBOX as follow-up work rather than suppressing it.
 Step 9. Rebuild the index:
     {{PYTHON}} {{SCRIPTS}}/build_manifest.py --repo {{REPO}}
 
-Step 10. Update INBOX.md and inquiries/ statuses. An inquiry may only be
-marked `answered` if you add `result_notes` entries naming the **permanent**
-notes that answered it — lint_links fails the PR otherwise, and rightly: a
-question closed with nothing to point at was not answered. Leave a question you
-could not resolve as `in-progress` and say why in its body. Then hand off:
+Step 10. Update INBOX.md and inquiries/ statuses. Move an inquiry with the
+tool, which validates before it writes:
+    {{PYTHON}} {{SCRIPTS}}/capture.py --repo {{REPO}} inquiry-update <key> --status answered --result-notes <permanent-key>
+An inquiry may only be marked `answered` with `result_notes` naming the
+**permanent** notes that answered it — lint_links fails the PR otherwise, and
+rightly: a question closed with nothing to point at was not answered. Leave a
+question you could not resolve as `in-progress` and say why:
+    {{PYTHON}} {{SCRIPTS}}/capture.py --repo {{REPO}} inquiry-update <key> --status in-progress --note "<what is still missing>"
+Then hand off:
     {{SCRIPTS}}/remote_cycle.sh finish --repo {{REPO}} --title "<one-line summary>"
 This commits, pushes your branch, and opens a PR. **CI runs the gates again on
 that PR and decides whether it reaches main.** If your cycle produced nothing

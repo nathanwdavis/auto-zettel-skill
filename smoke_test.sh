@@ -41,7 +41,8 @@ for s in build_manifest.py lint_citations.py lint_links.py verify_refs.py fetch_
   "$PY" "scripts/$s" --help >/dev/null 2>&1 || fail "scripts/$s --help"
   pass "scripts/$s --help"
 done
-for sh_script in init_content_repo.sh maintenance_run.sh new_worktree.sh adhoc_research.sh; do
+for sh_script in init_content_repo.sh maintenance_run.sh new_worktree.sh adhoc_research.sh \
+                 session_cycle.sh remote_cycle.sh; do
   bash "scripts/$sh_script" --help >/dev/null || fail "$sh_script --help"
   pass "scripts/$sh_script --help"
 done
@@ -247,6 +248,170 @@ for g in build_manifest.py lint_citations.py lint_links.py; do
 done
 pass "a dropped PDF was ingested into a gate-clean reference and capture (A11)"
 
+# A12: the note generators. Each must refuse at WRITE time what the lints
+# refuse at gate time, and the reference generator must be honest about what it
+# could not verify rather than writing a green-looking block.
+GREF="$("$PY" scripts/capture.py --repo "$KB" reference "A Generated Source" \
+  --author "Smoke, Sam" --year 2026 --url https://example.org/generated \
+  --source-tier general-web --offline 2>/dev/null)" || fail "capture.py reference"
+GREFKEY="$(basename "$GREF" .md)"
+grep -q "^chicago_note: ." "$KB/$GREF" || fail "reference generator left chicago_note empty"
+# The lint EXITS 1 here by design, and pipefail would read that as the step
+# failing -- capture first, then match.
+GLINT="$("$PY" scripts/lint_citations.py --repo "$KB" 2>/dev/null || true)"
+echo "$GLINT" | grep -q "unverified-reference" \
+  || fail "an uncaptured reference should fail the citation gate honestly"
+pass "capture.py reference rendered Chicago strings and reported itself unverified"
+
+"$PY" scripts/capture.py --repo "$KB" reference "Dup" --url https://example.org/generated \
+  --offline >/dev/null 2>&1 && fail "a duplicate source should be refused (FR-4)"
+"$PY" scripts/capture.py --repo "$KB" permanent "Bad" --link "$GREFKEY:cites" >/dev/null 2>&1 \
+  && fail "a relation outside FR-5 should be refused"
+"$PY" scripts/capture.py --repo "$KB" literature "Bad" --reference "$GREFKEY" --locator "" \
+  >/dev/null 2>&1 && fail "a literature note with no locator should be refused"
+pass "the generators refuse a duplicate source, a bad relation, and an empty locator"
+
+# The honest path to green: capture the source, verify, then write the notes.
+GID="${GREFKEY##*--}"; GSLUG="${GREFKEY%--*}"
+printf 'Verbatim capture for the smoke test.\n' > "$KB/raw/$GID-$GSLUG.txt"
+"$PY" - "$KB" "$GREF" "raw/$GID-$GSLUG.txt" <<'CAPPY'
+import sys
+sys.path.insert(0, "scripts")
+from pathlib import Path
+from zettel_lib.frontmatter import Note
+note = Note.load(Path(sys.argv[1]) / sys.argv[2])
+note.meta["raw_capture"] = sys.argv[3]
+note.save()
+CAPPY
+"$PY" scripts/verify_refs.py --repo "$KB" --offline >/dev/null || fail "verify_refs after capture"
+GLIT="$("$PY" scripts/capture.py --repo "$KB" literature "Sam on generation" \
+  --reference "$GREFKEY" --locator "p. 1")" || fail "capture.py literature"
+"$PY" scripts/capture.py --repo "$KB" permanent "Generated notes pass the gates" \
+  --link "$(basename "$GLIT" .md):elaborates" >/dev/null || fail "capture.py permanent"
+for g in build_manifest.py lint_citations.py lint_links.py; do
+  args=(); [[ "$g" == build_manifest.py ]] && args=(--check)
+  "$PY" "scripts/$g" --repo "$KB" "${args[@]}" >/dev/null || fail "$g after the generators"
+done
+pass "generated reference, literature, and permanent notes pass every gate"
+
+# A12: the inquiry updater enforces AC-6 before it writes anything.
+UINQ="$(basename "$(ls "$KB"/inquiries/*.md | head -1)" .md)"
+"$PY" scripts/capture.py --repo "$KB" inquiry-update "$UINQ" --status answered >/dev/null 2>&1 \
+  && fail "answered with no result_notes should be refused (AC-6)"
+UPERM="$(basename "$(ls "$KB"/permanent/generated-notes-pass-the-gates--*.md | head -1)" .md)"
+"$PY" scripts/capture.py --repo "$KB" inquiry-update "$UINQ" --status answered \
+  --result-notes "$UPERM" >/dev/null || fail "capture.py inquiry-update"
+"$PY" scripts/build_manifest.py --repo "$KB" --check >/dev/null \
+  || fail "inquiry-update left the manifest stale"
+"$PY" scripts/lint_links.py --repo "$KB" >/dev/null || fail "lint_links after inquiry-update"
+pass "inquiry-update refused AC-6, then answered and rebuilt the manifest"
+
+# A12: --file ingests one external source and leaves the caller's file alone.
+"$PY" - "$WORK" <<'EXTPY'
+import sys
+sys.path.insert(0, "tests"); sys.path.insert(0, "scripts")
+from pathlib import Path
+from conftest import make_pdf
+Path(sys.argv[1], "attached.pdf").write_bytes(
+    make_pdf(pages=["An attached smoke source", "Page two of the attachment"]))
+EXTPY
+"$PY" scripts/ingest_drops.py --repo "$KB" --file "$WORK/attached.pdf" \
+  --title "An Attached Smoke Source" --author "Smoke, Sam" --year 2026 --offline \
+  | grep -q "^ingested" || fail "ingest_drops.py --file"
+[[ -f "$WORK/attached.pdf" ]] || fail "--file consumed the caller's file instead of copying it"
+ATXT="$(ls "$KB"/raw/*-an-attached-smoke-source.txt)"
+grep -q -- "--- page 2 ---" "$ATXT" || fail "extraction is missing page markers"
+grep -q "Page two of the attachment" "$ATXT" || fail "a late page was truncated away"
+pass "--file ingested an attachment with page-marked full text, leaving the original"
+
+# A12: the gates subcommand runs CI's list, and finish refuses a red branch.
+"$PY" scripts/build_manifest.py --repo "$KB" >/dev/null
+bash scripts/remote_cycle.sh gates --repo "$KB" 2>/dev/null | grep -q "gates: PASS" \
+  || fail "remote_cycle.sh gates on a clean repo"
+pass "remote_cycle.sh gates ran the merge gates"
+
+# A12 phase 2: the three session flows. Each claims the same lock, opens the
+# same kind of run branch, and prints a checklist naming real commands.
+SKB="$WORK/kb-session"
+git clone -q "$RORIGIN" "$SKB"
+git -C "$SKB" remote set-head origin -a >/dev/null 2>&1 || true
+
+"$PY" - "$WORK" <<'SRCPY'
+import sys
+sys.path.insert(0, "tests"); sys.path.insert(0, "scripts")
+from pathlib import Path
+from conftest import make_pdf
+Path(sys.argv[1], "handed.pdf").write_bytes(
+    make_pdf(pages=["A handed smoke source", "Page two of the handed source"]))
+SRCPY
+
+SESSION_OUT="$(ZETTEL_RUN_HOLDER=session bash scripts/session_cycle.sh ingest \
+  --repo "$SKB" --source "$WORK/handed.pdf" --title "A Handed Smoke Source" \
+  --author "Smoke, Sam" --year 2026)" || fail "session_cycle.sh ingest"
+echo "$SESSION_OUT" | grep -q "^branch: zettel/run-" || fail "ingest printed no run branch"
+echo "$SESSION_OUT" | grep -q "^reference: a-handed-smoke-source--" || fail "ingest printed no reference"
+echo "$SESSION_OUT" | grep -q -- "--- page N ---" || fail "ingest checklist omits page locators"
+echo "$SESSION_OUT" | grep -q "{{" && fail "ingest checklist has unsubstituted placeholders"
+[[ -f "$WORK/handed.pdf" ]] || fail "ingest consumed the caller's file"
+bash scripts/remote_cycle.sh gates --repo "$SKB" >/dev/null 2>&1 || fail "gates after session ingest"
+pass "session_cycle.sh ingest captured a handed source and printed a real checklist"
+
+bash scripts/remote_cycle.sh abort --repo "$SKB" >/dev/null 2>&1 || true
+git -C "$SKB" checkout -q main; git -C "$SKB" checkout -q -- .; git -C "$SKB" clean -qfd
+QUERY_OUT="$(ZETTEL_RUN_HOLDER=session bash scripts/session_cycle.sh query \
+  --repo "$SKB" --from-query "quantum chromodynamics")" || fail "session_cycle.sh query"
+QBRANCH="$(echo "$QUERY_OUT" | sed -n 's/^branch: //p')"
+[[ -n "$QBRANCH" ]] || fail "query mode printed no branch"
+[[ "$(git -C "$SKB" branch --show-current)" == "$QBRANCH" ]] \
+  || fail "query filed its gaps off the run branch"
+ls "$SKB"/inquiries/quantum-chromodynamics--*.md >/dev/null 2>&1 \
+  || fail "query did not file the research gap"
+bash scripts/remote_cycle.sh gates --repo "$SKB" >/dev/null 2>&1 || fail "gates after filed gaps"
+pass "session_cycle.sh query filed its gaps ON the run branch, gate-clean"
+
+bash scripts/remote_cycle.sh abort --repo "$SKB" >/dev/null 2>&1 || true
+git -C "$SKB" checkout -q main; git -C "$SKB" checkout -q -- .; git -C "$SKB" clean -qfd
+
+# A source already on file must be NAMED, not ingested twice -- and the lock
+# handed back, because "already have it" is an answer, not a failure. The first
+# copy is committed on main so `start`'s checkout still sees it.
+"$PY" scripts/ingest_drops.py --repo "$SKB" --file "$WORK/handed.pdf" \
+  --title "An Identified Source" --isbn 9781542866507 --offline >/dev/null \
+  || fail "seeding the duplicate check"
+git -C "$SKB" add -A
+git -C "$SKB" -c user.name=t -c user.email=t@localhost commit -qm "seed a source" \
+  || fail "committing the seeded source"
+DUP_OUT="$(ZETTEL_RUN_HOLDER=session bash scripts/session_cycle.sh ingest \
+  --repo "$SKB" --source "$WORK/handed.pdf" --title "Dup" --isbn 9781542866507 2>/dev/null)" \
+  && fail "a duplicate source should exit non-zero"
+echo "$DUP_OUT" | grep -q "^duplicate_of: an-identified-source--" \
+  || fail "duplicate did not name the existing note (got: $DUP_OUT)"
+DUP_STATUS="$(bash scripts/remote_cycle.sh status --repo "$SKB" 2>&1 || true)"
+echo "$DUP_STATUS" | grep -q "lock: free" \
+  || fail "a duplicate ingest left the lock held (status: $DUP_STATUS)"
+[[ -f "$WORK/handed.pdf" ]] || fail "the duplicate attempt consumed the caller's file"
+pass "a duplicate source is named, not ingested, and the lock is handed back"
+
+# Every skill must be portable and linked, or its slash command does not exist.
+"$PY" - <<'SKILLPY' || fail "skill frontmatter"
+import sys, yaml
+from pathlib import Path
+portable = {"name", "description", "license", "compatibility", "metadata", "allowed-tools"}
+found = []
+for skill in sorted(Path("skills").iterdir()):
+    md = skill / "SKILL.md"
+    assert md.is_file(), f"{skill.name}: no SKILL.md"
+    meta = yaml.safe_load(md.read_text(encoding="utf-8").split("---\n")[1])
+    extra = set(meta) - portable
+    assert not extra, f"{skill.name}: non-portable frontmatter {sorted(extra)}"
+    assert meta["name"] == skill.name, f"{skill.name}: name mismatch"
+    assert len(meta["description"]) <= 1024, f"{skill.name}: description too long"
+    found.append(skill.name)
+assert {"zettel-bootstrap", "zettel-ingest", "zettel-query", "zettel-ask"} <= set(found), found
+SKILLPY
+grep -q 'skills/\*/' ci/setup-environment.sh || fail "setup script does not link every skill"
+pass "all four skills carry portable frontmatter and are linked by the setup script"
+
 # Ad-hoc research shares the lock with scheduled runs and never reaches main.
 AKB="$WORK/kb-adhoc"
 git clone -q "$RORIGIN" "$AKB"
@@ -263,6 +428,16 @@ ADHOC_BLOCKED="$(ZETTEL_RUN_HOLDER=adhoc-2 bash scripts/adhoc_research.sh \
 echo "$ADHOC_BLOCKED" | grep -q "rc=3" \
   || fail "ad-hoc did not stand down while the lock was held (got: $ADHOC_BLOCKED)"
 pass "a second ad-hoc run stood down on the shared lock (exit 3)"
+
+# finish gates before it pushes: a red branch must not reach a PR nobody is
+# left to fix. The lock stays held, so the same session can fix and re-run.
+echo "no frontmatter here" > "$AKB/fleeting/broken.md"
+bash scripts/remote_cycle.sh finish --repo "$AKB" --title "should not land" >/dev/null 2>&1 \
+  && fail "finish pushed a branch whose gates fail"
+git -C "$RORIGIN" branch | grep -q "$ABRANCH" \
+  && fail "a gate-failing branch reached origin"
+rm "$AKB/fleeting/broken.md"
+pass "finish refused to push a branch that fails the gates"
 
 MAIN_BEFORE="$(git -C "$RORIGIN" rev-parse main)"
 bash scripts/remote_cycle.sh finish --repo "$AKB" --title "smoke ad-hoc" >/dev/null \

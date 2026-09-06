@@ -11,7 +11,100 @@ have to — so the input paths need their own design.
 | Jot a thought before it evaporates | `capture.py … fleeting` | `fleeting/`, swept next cycle |
 | Ask a question for a run to work later | `capture.py … inquiry` | `inquiries/`, worked next cycle |
 | Give a run feedback or an instruction | `capture.py … inbox`, or edit `INBOX.md` | `INBOX.md`, read first each cycle |
-| Get an answer **now** | `adhoc_research.sh` | a run branch, gated by CI |
+| Get an answer **now** | `session_cycle.sh ask` | a run branch, gated by CI |
+| Add a source **now** | `session_cycle.sh ingest --source` | a run branch, gated by CI |
+| Close the gaps a query found **now** | `session_cycle.sh query --from-query` | a run branch, gated by CI |
+
+## The three session flows
+
+```sh
+scripts/session_cycle.sh ask    --repo <repo> --question "..."
+scripts/session_cycle.sh ingest --repo <repo> --source <file> [--title ...] [--doi ...]
+scripts/session_cycle.sh query  --repo <repo> --from-query "..."
+```
+
+Different work, identical handling: each claims the same lock a scheduled
+cycle claims, opens the same kind of `zettel/run-*` branch, and hands off
+through the same PR and required check. There is no fast path to `main`,
+because a fast path to `main` is a path around the citation gates. Exit 3 from
+any of them means a live run holds the lock — stand down; never force it.
+
+Each then prints a **checklist naming the concrete commands** for the rest of
+the job, rendered with this repo's real paths the way the maintenance prompts
+are. That is the point of the script: a checklist of placeholders gets
+improvised around, one of real commands gets run.
+
+- **`ask`** files the question as an inquiry *before* any research, so an
+  interrupted session still leaves the question behind. Its checklist opens
+  with a coverage check, because re-researching what the base already holds is
+  the most expensive mistake available.
+- **`ingest`** copies the file in (never consuming the caller's), captures it
+  into `raw/`, writes the reference note, and hands over the page-marked text.
+  A source already on file exits 1 with `duplicate_of: <key>` and releases the
+  lock — that is an answer, not a failure.
+- **`query`** claims the lock and opens the branch **before** filing the gaps.
+  The order is the whole reason it exists: filing first would put the captures
+  on whatever branch was checked out, and `start`'s own checkout would strand
+  them. Nothing worth filing means no cycle: it releases the lock and says so.
+
+Each flow is also a slash command — `/zettel-ask`, `/zettel-ingest`,
+`/zettel-query` — through the sub-skills under `skills/`.
+
+`adhoc_research.sh` remains as `session_cycle.sh ask` under its original name,
+with its output contract unchanged.
+
+### The note generators (A12)
+
+The three routes above cover human input. The notes themselves have
+generators too, for the same reason and against the same invariant — the
+agents were previously told to write reference, literature, and permanent
+notes from `templates/` by hand, into a repo whose gates demand exact
+frontmatter:
+
+| Kind | Command | Refuses at write time |
+|---|---|---|
+| reference | `capture.py --repo R reference "Title" --doi X` | a second note for a source already on file (FR-4) |
+| literature | `capture.py --repo R literature "Title" --reference KEY --locator "p. 12"` | an unknown reference; an empty locator |
+| permanent | `capture.py --repo R permanent "Claim" --link KEY:relation` | no link (1-1-1); a relation outside FR-5; an unresolvable target |
+
+Each refuses at *write* time exactly what the lints refuse at *gate* time, so
+a generated note cannot fail the gate it was written for.
+
+`reference` also renders its Chicago strings and attempts verification at
+creation, through the same `verify_refs` the gate uses. With a resolvable DOI,
+ISBN, arXiv id, or PMID the note is gate-clean the moment it exists. Without
+one — or with `--offline` — it stays honestly `verified: false` and the tool
+says so:
+
+```
+UNVERIFIED: capture the source with `fetch_source.py --ref <key> --url <url>`,
+then run verify_refs.py. lint_citations fails until then -- that is the gate
+working, so do not hand-edit the verification block.
+```
+
+That red gate is the invariant doing its job. The way out is a capture, never
+an edit to the verification block.
+
+### Moving an inquiry along (A12)
+
+```sh
+scripts/capture.py --repo <repo> inquiry-update <key> --status in-progress
+scripts/capture.py --repo <repo> inquiry-update <key> --status answered \
+  --result-notes atomic-notes-compound-over-time--202608301200
+scripts/capture.py --repo <repo> inquiry-update <key> --note "Why this stalled."
+```
+
+It lives in `capture.py` rather than `inquiries.py` on purpose. `inquiries.py`
+is a read-only reporter (A9: a query is not an operation), and the manifest
+indexes an inquiry's `status` and `result_notes` — so a writer must rebuild it
+or the next `build_manifest --check` goes red on a PR that only moved a
+status. `capture.py` already logs and already rebuilds.
+
+Every check runs **before** anything is written, so a refused update leaves
+the inquiry exactly as it was: `answered` needs at least one result note
+(AC-6), and every result note must resolve to a **permanent** note. `--note`
+appends a dated paragraph to the body, which is where an unresolved question
+records why it stalled.
 
 ### Why a capture tool rather than looser gates
 
@@ -115,11 +208,15 @@ so existing Routines get it) and, per file:
 
 1. moves it to `raw/<id>-<slug>.<ext>` — immutable evidence, exactly like a
    fetched capture — and writes `raw/<id>-<slug>.txt` with the text pypdf
-   extracts (first five pages), so agents and `query.py` can grep it;
+   extracts from **every** page, each marked `--- page N ---` so a literature
+   note can cite `p. N` without reopening the PDF. Identity detection still
+   reads only the first five pages: a DOI deep in a paper is almost always a
+   cited work's, not the source's own;
 2. writes `reference/<key>.md` with CSL-JSON: from the optional sidecar
    `<stem>.yml` (`title, author, year, doi, isbn, arxiv, pmid, url,
-   source_tier, priority, notes, tags`), else from a DOI or arXiv id found in
-   the text and the PDF's own metadata, enriched from Crossref when the DOI
+   source_tier, priority, notes, tags` — a scalar `tags: notes` is one tag, and
+   a comma-separated string splits the way `--tags` does), else from a DOI or
+   arXiv id found in the text and the PDF's own metadata, enriched from Crossref when the DOI
    resolves; the tier defaults to `peer-reviewed` for a DOI and
    `reputable-secondary` otherwise; `provenance` records the original name;
 3. verifies it on the capture and renders the Chicago strings immediately,
@@ -127,6 +224,29 @@ so existing Routines get it) and, per file:
 4. files an INBOX entry — "Dropped source ready: <title>" — that the run
    works before any new inquiry: literature note from the capture, then
    synthesis, never a re-fetch.
+
+### A source handed to a session
+
+`drop/` is the route for a file you commit for the *next* cycle. When a
+session is handed a source right now — an attachment, a path on disk — it
+ingests that one file directly:
+
+```sh
+scripts/ingest_drops.py --repo <repo> --file ~/Downloads/paper.pdf \
+  --title "..." --author "Ahrens, Sönke" --year 2017 --doi 10.xxxx/yyy
+```
+
+The flags stand in for the sidecar, so nothing needs writing beside the file.
+A source must be one of `.pdf`, `.txt`, `.md`, `.html`, `.htm` — the same set a
+committed drop is filtered to. Anything else is refused as a usage error rather
+than copied in and "extracted" as noise, because `raw/` is immutable and a bad
+capture would stay.
+The file is **copied**, never consumed — it belongs to whoever handed it over
+— and only that file is ingested, so a drop someone committed for the next
+scheduled cycle is not swept into this session's PR. A `--file` that turns out
+to duplicate a reference already on file is deleted rather than marked, and
+the command exits non-zero: nothing was handed to a future run, so there is
+nothing to report in INBOX.
 
 Two things are marked rather than ingested, so a run never creates a second
 reference for one source and never silently loses a file: a drop whose
@@ -138,12 +258,12 @@ becomes `<stem>.too-large.pdf`; both get an INBOX entry. Nothing in
 ## Ad-hoc research
 
 ```sh
-scripts/adhoc_research.sh --repo <repo> --question "..." [--priority high] [--body -]
+scripts/session_cycle.sh ask --repo <repo> --question "..." [--priority high] [--body -]
 ```
 
-This does bookkeeping only — the research is the session's work. What it
-guarantees is that an ad-hoc answer arrives by exactly the same road as a
-scheduled one:
+This does bookkeeping and instruction — the research is the session's work.
+What it guarantees is that an ad-hoc answer arrives by exactly the same road
+as a scheduled one:
 
 1. **Same lock.** It calls `remote_cycle.sh start`, so an ad-hoc session and a
    scheduled cycle can never both be writing. **Exit 3 means a live run holds

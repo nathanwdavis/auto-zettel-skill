@@ -14,8 +14,8 @@ Routine (cron schedule)
         ├─ remote_cycle.sh start   → claim git lock, create run branch
         ├─ the session IS the agent: reads INBOX, researches, synthesizes,
         │   runs the gates, rebuilds the manifest
-        └─ remote_cycle.sh finish  → push branch, open PR
-              └─> GitHub Actions runs the gates
+        └─ remote_cycle.sh finish  → gate, commit, push branch, open PR
+              └─> GitHub Actions runs the gates again, server-side
                     └─> required check passes → auto-merge to main
 ```
 
@@ -59,6 +59,16 @@ script that re-ran the lints — enforcement the agent shared a filesystem with.
 Now the run can only offer a branch, and a required status check decides. The
 check runs server-side, on infrastructure no session can reach. That is what
 makes it safe to drop the nested `claude -p`.
+
+**`finish` also gates before it commits** (A12). CI remains the merge
+authority; this only moves the finding early enough for the session to act on
+it. The gap it closes was operational: a session pushed a red branch and ended,
+CI reported minutes later into an empty room, and the PR sat with nobody left
+to fix it. On a gate failure nothing is committed or pushed and **the lock
+stays held** — the session still owns the cycle and can fix and re-run;
+`abort` is how it hands the lock back. `finish --no-gates` hands a red state to
+CI deliberately and says so in `log.md`. The same list is available on its own
+as `remote_cycle.sh gates --repo <repo>`.
 
 **The budget cap is the real loss.** `--max-budget-usd` is a flag on `claude -p`;
 a Routine-fired session has no equivalent. Cost is now bounded by how often you
@@ -181,9 +191,11 @@ once past the TTL, so a crash costs one cycle rather than wedging the schedule.
 ## Ad-hoc runs share the lock
 
 A scheduled cycle is not the only thing that claims the lock.
-`scripts/adhoc_research.sh` — "answer this question now" — calls the same
-`remote_cycle.sh start`, so an ad-hoc session and a scheduled firing can never
-both be writing to the content repo.
+`scripts/session_cycle.sh` — `ask` ("answer this question now"), `ingest` (a
+source the session was handed), and `query` (close the gaps a query found) —
+calls the same `remote_cycle.sh start`, so a session and a scheduled firing can
+never both be writing to the content repo. (`adhoc_research.sh` is
+`session_cycle.sh ask` under its original name.)
 
 The contention is real in both directions, and both are handled the same way:
 
@@ -197,6 +209,6 @@ minutes is doing exactly what the lock protects, and a scheduled run that
 barged in would duplicate the work and then race it into a conflicting branch.
 Only a provably stale lock (past `STALE_LOCK_HOURS`) is ever broken.
 
-Ad-hoc work hands off through `remote_cycle.sh finish` like any cycle: a run
-branch, a PR, and the required check. There is no ad-hoc path to `main`.
+Session work hands off through `remote_cycle.sh finish` like any cycle: a run
+branch, a PR, and the required check. There is no session path to `main`.
 See `references/capture.md`.

@@ -183,3 +183,207 @@ def test_the_move_passes_the_sandbox_gate(clean_repo):
 
 def test_help_and_usage(clean_repo):
     assert run_script("ingest_drops.py", clean_repo, "--help").returncode == 0
+
+
+# --- full-text, page-aware extraction (A12) -----------------------------------
+# The extraction is what a literature note is written from, so truncating it at
+# five pages meant a session could neither read past page five nor cite a
+# locator it had not seen. Identity stays on the front pages, though: a DOI
+# deep in a paper is nearly always a cited work's, not the source's own.
+
+def test_every_page_is_extracted_with_page_markers(clean_repo):
+    drop_file(clean_repo, "long.pdf", make_pdf(pages=[
+        "Front matter and the title line here",
+        "Page two body text",
+        "Page three body text",
+        "Page four body text",
+        "Page five body text",
+        "Page six says something quotable",
+    ]), sidecar={"title": "A Long Paper"})
+    results = ingest_drops.ingest(ContentRepo(clean_repo), offline=True)
+    assert results[0]["kind"] == "ingested"
+    text = (clean_repo / results[0]["capture"]).with_suffix(".txt").read_text(encoding="utf-8")
+    assert "--- page 6 ---" in text
+    assert "quotable" in text, "a late page must survive to be citable"
+    assert text.count("--- page ") == 6
+
+
+def test_a_late_page_doi_is_not_taken_as_the_source_identity(clean_repo):
+    """Page seven's DOI belongs to a work this paper cites."""
+    pages = ["Title page with no identifier at all"] + [f"Body page {i}" for i in range(2, 7)]
+    pages.append(f"References: see {DOI} for the related work")
+    drop_file(clean_repo, "late.pdf", make_pdf(pages=pages))
+    results = ingest_drops.ingest(ContentRepo(clean_repo), offline=True)
+    note = load(clean_repo, f"reference/{results[0]['key']}.md")
+    assert "DOI" not in note.meta["csl_json"]
+    text = (clean_repo / results[0]["capture"]).with_suffix(".txt").read_text(encoding="utf-8")
+    assert DOI in text, "the citation is still in the extraction, just not the identity"
+
+
+def test_an_early_page_doi_is_still_found(clean_repo):
+    drop_file(clean_repo, "early.pdf", make_pdf(pages=[
+        f"A Paper With Its Own DOI {DOI}", "Body page two", "Body page three"]))
+    results = ingest_drops.ingest(ContentRepo(clean_repo), offline=True)
+    note = load(clean_repo, f"reference/{results[0]['key']}.md")
+    assert note.meta["csl_json"]["DOI"] == DOI
+
+
+def test_a_page_marker_never_becomes_the_title(clean_repo):
+    """`--- page 1 ---` is 14 characters and would fit the title heuristic."""
+    drop_file(clean_repo, "untitled.pdf", make_pdf(pages=["", "Body text on the second page"]))
+    results = ingest_drops.ingest(ContentRepo(clean_repo), offline=True)
+    note = load(clean_repo, f"reference/{results[0]['key']}.md")
+    assert "page" not in note.title.lower() or "---" not in note.title
+    assert not note.title.startswith("---")
+
+
+def test_an_oversize_extraction_is_truncated_with_a_warning(clean_repo, monkeypatch):
+    monkeypatch.setattr(ingest_drops, "MAX_EXTRACT_CHARS", 200)
+    drop_file(clean_repo, "big.pdf", make_pdf(pages=[f"Page {i} " + "filler " * 20
+                                                     for i in range(1, 8)]),
+              sidecar={"title": "A Big Scan"})
+    results = ingest_drops.ingest(ContentRepo(clean_repo), offline=True)
+    assert any("truncated" in w for w in results[0]["warnings"])
+    text = (clean_repo / results[0]["capture"]).with_suffix(".txt").read_text(encoding="utf-8")
+    assert len(text) < 600  # header + the 200 truncated chars
+
+
+def test_ingest_and_capture_share_one_reference_builder(clean_repo):
+    """Two callers, one builder -- or the two input routes drift apart."""
+    from zettel_lib import references
+
+    assert ingest_drops.build_reference is references.build_reference
+    assert ingest_drops.crossref_csl is references.crossref_csl
+
+
+# --- --file: the source a session was handed (A12) ----------------------------
+
+def test_file_flag_copies_an_external_source_and_ingests_it(tmp_path, clean_repo):
+    external = tmp_path / "attached.pdf"
+    external.write_bytes(make_pdf("An attached source about slip boxes"))
+    result = run_script("ingest_drops.py", clean_repo, "--file", str(external),
+                        "--title", "An Attached Source", "--author", "Tester, Ada",
+                        "--year", "2026", "--source-tier", "general-web", "--offline")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("ingested\t")
+    assert external.exists(), "the caller's file is copied, never consumed"
+    key = result.stdout.split("\t")[2]
+    note = load(clean_repo, f"reference/{key}.md")
+    assert note.title == "An Attached Source"
+    assert note.meta["csl_json"]["author"][0] == {"family": "Tester", "given": "Ada"}
+    assert note.meta["source_tier"] == "general-web"
+    assert note.meta["verification"]["verified"] is True   # verified on its capture
+    assert not list((clean_repo / "drop").glob("attached*")), "drop/ is left clean"
+
+
+def test_file_ingest_is_gate_clean(tmp_path, clean_repo):
+    external = tmp_path / "gated.pdf"
+    external.write_bytes(make_pdf("A source that must pass the gates"))
+    run_script("ingest_drops.py", clean_repo, "--file", str(external),
+               "--title", "A Gated Source", "--offline")
+    for gate in ("build_manifest.py", "lint_citations.py", "lint_links.py"):
+        assert run_script(gate, clean_repo).returncode == 0, gate
+
+
+def test_file_ingests_only_that_file(tmp_path, clean_repo):
+    """A committed drop belongs to the next scheduled cycle, not to this session."""
+    drop_file(clean_repo, "someone-elses.pdf", make_pdf("Committed for the next run"),
+              sidecar={"title": "Someone Else's Source"})
+    external = tmp_path / "mine.pdf"
+    external.write_bytes(make_pdf("The source I was handed"))
+    result = run_script("ingest_drops.py", clean_repo, "--file", str(external),
+                        "--title", "Mine", "--offline")
+    assert result.returncode == 0
+    assert len(result.stdout.strip().splitlines()) == 1
+    assert (clean_repo / "drop" / "someone-elses.pdf").exists()
+
+
+def test_file_duplicate_discards_the_copy_and_exits_nonzero(tmp_path, clean_repo):
+    external = tmp_path / "dup.pdf"
+    external.write_bytes(make_pdf("Smart notes again"))
+    result = run_script("ingest_drops.py", clean_repo, "--file", str(external),
+                        "--title", "Smart Notes Again", "--isbn", "9781542866507", "--offline")
+    assert result.returncode == 1
+    assert REF_KEY in result.stdout or REF_KEY in result.stderr
+    assert not list((clean_repo / "drop").glob("dup*")), "no litter, no INBOX entry"
+    assert "duplicates an existing reference" not in (clean_repo / "INBOX.md").read_text()
+    assert external.exists()
+
+
+def test_file_name_collision_in_drop_is_refused(tmp_path, clean_repo):
+    drop_file(clean_repo, "same.pdf", make_pdf("Already pending"))
+    external = tmp_path / "same.pdf"
+    external.write_bytes(make_pdf("A different source with the same filename"))
+    result = run_script("ingest_drops.py", clean_repo, "--file", str(external), "--offline")
+    # 2, not 1: staging is argument validation (a bad path, an unreadable type,
+    # a name already pending), and usage errors exit 2 across every entry point.
+    assert result.returncode == 2 and "already exists" in result.stderr
+
+
+def test_sidecar_flags_without_file_are_a_usage_error(clean_repo):
+    result = run_script("ingest_drops.py", clean_repo, "--title", "Orphaned flag")
+    assert result.returncode == 2 and "describe a --file" in result.stderr
+
+
+def test_file_staging_is_logged(tmp_path, clean_repo):
+    external = tmp_path / "logged.pdf"
+    external.write_bytes(make_pdf("Logged source"))
+    run_script("ingest_drops.py", clean_repo, "--file", str(external),
+               "--title", "Logged Source", "--offline")
+    log = (clean_repo / "log.md").read_text(encoding="utf-8")
+    assert "--file" in log and "staged as drop/logged.pdf" in log
+
+
+# --- review findings on PR #17 ------------------------------------------------
+
+def test_file_refuses_an_unsupported_source_type(tmp_path, clean_repo):
+    """--file was the one way into raw/ that skipped pending()'s filter.
+
+    A committed drop of the wrong type is silently ignored; --file copied it in,
+    "extracted" replacement-character noise from it, and wrote a reference note
+    citing it. raw/ is immutable, so that capture would then stay forever.
+    """
+    junk = tmp_path / "spreadsheet.xlsx"
+    junk.write_bytes(b"PK\x03\x04 not a document this pipeline can read")
+    result = run_script("ingest_drops.py", clean_repo, "--file", str(junk), "--offline")
+    assert result.returncode == 2
+    assert "unsupported source type" in result.stderr
+    assert ".pdf" in result.stderr, "the message names what IS accepted"
+    assert not list((clean_repo / "drop").glob("spreadsheet*")), "nothing was staged"
+    assert not list((clean_repo / "raw").glob("*spreadsheet*"))
+
+
+def test_file_accepts_every_type_a_committed_drop_would(tmp_path, clean_repo):
+    """The two routes agree on what a source is."""
+    for i, ext in enumerate(ingest_drops.SOURCE_EXTS):
+        source = tmp_path / f"source{i}{ext}"
+        source.write_bytes(make_pdf(f"A source {i}") if ext == ".pdf"
+                           else f"A source about slip boxes {i}".encode())
+        result = run_script("ingest_drops.py", clean_repo, "--file", str(source),
+                            "--title", f"Accepted Source {i}", "--offline")
+        assert result.returncode == 0, f"{ext}: {result.stderr}"
+
+
+def test_a_scalar_sidecar_tag_is_one_tag_not_five(clean_repo):
+    """`tags: notes` in YAML is the natural way to write one tag."""
+    drop_file(clean_repo, "tagged.pdf", make_pdf("A tagged source"),
+              sidecar={"title": "A Tagged Source", "tags": "notes"})
+    results = ingest_drops.ingest(ContentRepo(clean_repo), offline=True)
+    note = load(clean_repo, f"reference/{results[0]['key']}.md")
+    assert note.tags == ["notes"], "a string must not iterate into characters"
+
+
+def test_a_comma_separated_sidecar_tag_string_splits_like_the_cli(clean_repo):
+    drop_file(clean_repo, "multi.pdf", make_pdf("A multi-tagged source"),
+              sidecar={"title": "A Multi Tagged Source", "tags": "notes, networks"})
+    results = ingest_drops.ingest(ContentRepo(clean_repo), offline=True)
+    note = load(clean_repo, f"reference/{results[0]['key']}.md")
+    assert note.tags == ["notes", "networks"]
+
+
+def test_a_sidecar_tag_list_still_works(clean_repo):
+    drop_file(clean_repo, "listed.pdf", make_pdf("A list-tagged source"),
+              sidecar={"title": "A List Tagged Source", "tags": ["notes", "networks"]})
+    results = ingest_drops.ingest(ContentRepo(clean_repo), offline=True)
+    note = load(clean_repo, f"reference/{results[0]['key']}.md")
+    assert note.tags == ["notes", "networks"]

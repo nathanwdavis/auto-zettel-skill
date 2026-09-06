@@ -26,7 +26,12 @@ entries marked `new`, then `in-progress`.
 2. Read `config.yml` (`topics`, cadences, budget) and `log.md`'s recent
    entries to see what the last runs did.
 3. Plan the run: which inquiries to answer, which topics have gaps, what
-   routine maintenance is due. Log the plan as one line in `log.md`.
+   routine maintenance is due. For each configured topic, ask the base what it
+   already has before assigning research — `scripts/query.py --repo <repo>
+   "<topic>" --json` names the gaps and which role each one needs (a
+   researcher for a topic the base lacks, a synthesizer for captured material
+   nobody distilled, the librarian for notes no MOC reaches). It is read-only
+   and costs nothing. Log the plan as one line in `log.md`.
 4. For each research/synthesis stream, create an isolated worktree with
    `new_worktree.sh --repo <repo> --name <branch>` and hand its path to the
    agent you dispatch.

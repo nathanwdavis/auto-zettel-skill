@@ -17,6 +17,15 @@ SUBSTRATE_DIRS = NOTE_DIRS + (INQUIRY_DIR, "raw", "skills", "proposed-links", ".
 #: FR-6 lifecycle. A run works `new` first and never touches `archived`.
 INQUIRY_STATUSES = ("new", "in-progress", "answered", "archived")
 
+#: The FR-5 typed-link taxonomy. Lives here rather than in lint_links because
+#: it is now enforced in two places -- the lint that fails a bad relation, and
+#: capture.py, which refuses to WRITE one. A generator holding its own copy of
+#: the closed set would eventually mint links its own gate rejects.
+RELATIONS = frozenset({
+    "supports", "contradicts", "analogous", "shared-concept",
+    "historical-connection", "elaborates", "refutes", "source",
+})
+
 #: Every FR-2 key, as dotted paths. The one list both maintenance paths
 #: validate against (AC-2): the laptop wrapper used to carry its own copy and
 #: the remote path had none, so a content repo missing `cadence` ran fine on

@@ -54,8 +54,11 @@ log.md            append-only run log
 
 1. Ask the user for topics, repo name, visibility, cadence, budget.
 2. `init_content_repo.sh` scaffolds, commits, and pushes the substrate.
-3. First knowledge pass: capture sources, write reference + literature notes,
-   distil a permanent note, build INDEX and a MOC.
+3. First knowledge pass: capture sources, then write the notes with the
+   generators (`capture.py reference` → `fetch_source.py` →
+   `capture.py literature` → `capture.py permanent`), build INDEX and a MOC.
+   Never hand-write a note file: each generator refuses at write time what the
+   lints refuse at gate time.
 4. Gates: `verify_refs` → `build_manifest` → `lint_citations` → `lint_links`
    → `lint_skills`.
 5. Commit and push only if every gate passes. Append to `log.md`.
@@ -72,6 +75,10 @@ lint_skills.py     HARD GATE: malformed or uncited child skills (Phase 4)
 
 The wrapper and CI additionally run `check_skill_sandbox.py` on the cycle's
 diff (append-only ledgers, immutable raw/); see `quality-gates.md`.
+
+`scripts/remote_cycle.sh gates --repo <repo>` runs exactly that list, in that
+order, with CI's arguments — and `finish` runs it before committing, refusing
+to push a branch whose gates fail.
 
 `verify_refs` deliberately does not fail. Separating "record what is true" from
 "decide whether that is acceptable" means a network outage degrades to

@@ -307,6 +307,105 @@ capture. Four additions, none of which weakens a gate:
   `lint_citations` gains `capture-too-large`. `pypdf` joins the runtime
   dependencies; the ingest degrades to sidecar/filename identity without it.
 
+### A12 — Session flows: generators, the inquiry updater, gates before the push, and a command per flow (2026-09-06, FR-4, FR-6, FR-10, FR-14, §7, §10)
+
+A6 closed casual human capture by generating well-formed artifacts rather than
+loosening a gate. The same gap was still open from the machine's side: the
+agents were instructed to write **reference, literature, and permanent** notes
+from `templates/` by hand, into a repo whose gates demand exact frontmatter.
+Every failure mode A6 describes applies unchanged — a malformed note fails the
+*next* run's manifest build, not its author's. Phase 1 of the session-flow work
+closes it the same way, and fixes two adjacent gaps found with it:
+
+- **`capture.py` gains `reference`, `literature`, and `permanent` kinds.** Each
+  refuses at write time exactly what the lints refuse at gate time: a second
+  reference note for a source already on file (FR-4, by
+  `citations.source_identity`), a relation outside the FR-5 taxonomy, a link
+  target that resolves to no note, a literature note with no locator or a
+  missing reference, a permanent note with no outbound link (1-1-1). The
+  builder moved out of `ingest_drops.py` into `zettel_lib/references.py` so the
+  drop route and the capture route mint identical artifacts; `RELATIONS` moved
+  from `lint_links.py` to `zettel_lib/repo.py` because a generator holding its
+  own copy of a closed set would eventually mint links its own gate rejects.
+  **`reference` renders the Chicago strings and attempts verification at
+  creation**, through the same `verify_refs.verify_note` the gate calls (FR-10):
+  with a resolvable identifier the note is gate-clean the moment it exists;
+  without one it stays honestly `verified: false` and the tool prints the
+  capture command. A sourced claim with no verified reference *warns* rather
+  than refuses — `lint_citations` owns what "sourced" means, and a claim
+  written before its source is captured is a normal intermediate state.
+- **`capture.py inquiry-update`** implements the FR-6 transitions no code
+  performed: statuses and `result_notes` were hand-edited YAML. It validates
+  before writing (AC-6: `answered` needs at least one result note, and every
+  result note must resolve to a **permanent** note), bumps `updated`, appends a
+  dated paragraph with `--note`, and regenerates the manifest — which indexes
+  `status` and `result_notes`, so a writer that skipped the rebuild would turn
+  every status change into a red `--check` on the next PR. It lives in
+  `capture.py`, not `inquiries.py`, to keep A9's read-only classification of
+  the reporter intact.
+- **`remote_cycle.sh gates`** runs the merge gates in CI's order with CI's
+  arguments, and **`finish` runs them before it commits**, refusing to commit or
+  push when they fail. The gap was operational: a session pushed a red branch
+  and ended, CI reported minutes later into an empty room, and the PR sat with
+  nobody left to fix it. CI remains the merge authority — this only moves the
+  finding early enough to act on. `--no-gates` is the deliberate escape and is
+  logged. The lock is *held* on a refusal (the session still owns the cycle);
+  `abort` hands it back. Ordering is load-bearing: stage, gate, re-stage —
+  staging first is what lets `check_skill_sandbox` see a new note (it diffs
+  tracked files), and re-staging is what commits the gates' own PASS lines, so
+  a branch's `log.md` records that the gates ran on it.
+- **Full-text, page-marked extraction (A11 revision).** `ingest_drops.extract`
+  read only the first five pages, so a session could neither read past page five
+  nor cite a locator it had not seen. It now extracts every page, marked
+  `--- page N ---` (`references.PAGE_MARKER`), capped by `MAX_EXTRACT_CHARS`.
+  **Identity detection still reads only the first five pages** (`IDENTITY_PAGES`):
+  a DOI deep in a paper is almost always a cited work's, not the source's own.
+- **`ingest_drops.py --file`** ingests a source a session was handed, with the
+  sidecar fields as flags. The file is **copied**, never consumed, and only that
+  file is ingested — a drop someone committed for the next scheduled cycle must
+  not be swept into this session's PR. A `--file` that duplicates an existing
+  reference is deleted and reported to the caller (exit 1) rather than marked
+  in place with an INBOX entry: nothing was handed to a future run, so there is
+  nothing to tell one.
+
+Phase 2 turned those foundations into the three flows a session actually
+performs, and gave each one a name a user can invoke:
+
+- **`scripts/session_cycle.sh <ask|ingest|query>`** owns lock, branch, and
+  abort-on-error for all three, and renders a per-mode checklist
+  (`session_{ask,ingest,query}_prompt.md`) with the repo's real paths
+  substituted in, exactly as the maintenance prompts are rendered. A checklist
+  of placeholders is improvised around; one of real commands is run. Only
+  `ask` existed before (as `adhoc_research.sh`, now a thin wrapper preserving
+  its `branch:`/`inquiry:`/exit-code contract): ingesting a handed source and
+  working a query's gaps were prose in SKILL.md, re-sequenced from memory every
+  time. Two orderings inside it are load-bearing. `query` claims the lock and
+  opens the branch **before** filing gaps, because filing first would put the
+  captures on whatever branch was checked out and `start`'s own checkout would
+  strand them. And every usage error is settled before any environment check,
+  so a missing flag reports as a usage error rather than as whatever the
+  environment complains about first.
+- **Three sub-skills** -- `skills/zettel-{ingest,query,ask}/SKILL.md` -- give
+  each flow a slash command (`/zettel-bootstrap:zettel-query` through the
+  plugin, `/zettel-query` through the symlink route). Each carries only the six
+  portable FR-14 frontmatter fields, consumes `$ARGUMENTS`, resolves the plugin
+  root through `CLAUDE_PLUGIN_ROOT` (falling back to `readlink -f` for the
+  symlink route), and routes into the scripts rather than restating the flow in
+  prose, which would drift. Their descriptions delineate against each other:
+  three overlapping skills with no stated boundary trigger on each other's
+  requests. `ci/setup-environment.sh` now links **every** `skills/*` directory,
+  since a sub-skill nobody links is a slash command that does not exist.
+- **The orchestra moved onto the generators.** `researcher.md` creates
+  reference and literature notes with `capture.py` instead of from
+  `templates/`; `synthesizer.md` uses `capture.py permanent` and carries the
+  quotation rule (a short quote belongs in a permanent note beside its
+  reference link, never in a literature note); `orchestrator.md` does gap
+  analysis with `query.py --json`, which is read-only and free. Both
+  maintenance prompts route step 8 through `remote_cycle.sh gates` and step 10
+  through `capture.py inquiry-update`. The `templates/` files remain the
+  reference for what each note type carries; they are no longer the way to
+  write one.
+
 -----
 
 ## TL;DR

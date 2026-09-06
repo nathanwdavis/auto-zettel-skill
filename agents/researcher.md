@@ -22,19 +22,32 @@ are immutable evidence, whatever is awkward about them.
 
 ## Per source
 
-1. Create the reference note from `templates/reference.md`: fill `csl_json`
-   completely (real authors, real dates, identifiers when they exist), leave
-   `raw_capture` empty for now, set `source_tier` honestly
-   (`peer-reviewed` > `primary-text` > `reputable-secondary` > `general-web`).
-   Leave `chicago_note`/`chicago_bib` empty — `verify_refs.py` renders them.
+1. Create the reference note with the generator, never by hand:
+
+       scripts/capture.py --repo <repo> reference --doi <doi>
+       scripts/capture.py --repo <repo> reference "<title>" --author "Family, Given" \
+         --year <year> --url <url> --source-tier reputable-secondary
+
+   It enriches from Crossref, renders the Chicago strings, refuses a second
+   note for a source already on file, and verifies through the registries when
+   an identifier resolves. Set `source_tier` honestly when you pass it
+   (`peer-reviewed` > `primary-text` > `reputable-secondary` > `general-web`);
+   with a DOI it defaults correctly. Writing this frontmatter by hand is how a
+   malformed note reaches the *next* run's manifest build.
 2. Capture with `scripts/fetch_source.py --repo <repo> --ref <key> --url <url>`.
    It names the file `raw/<id>-<slug>.<ext>`, writes the bytes verbatim,
    refuses to overwrite, and sets `raw_capture` in the note. Never fetch with
-   WebFetch and Write the capture by hand.
-3. Create the literature note from `templates/literature.md`: your own words,
-   exactly this one source, with a locator (page/section/timestamp). Never
-   paste source prose into a note — verbatim text lives only in `raw/`.
-4. Quick findings that are not yet note-worthy go in `fleeting/` notes.
+   WebFetch and Write the capture by hand. If step 1 reported **UNVERIFIED**,
+   this is what fixes it — never edit the verification block yourself.
+3. Create the literature note with the generator: your own words, exactly this
+   one source, with a locator.
+
+       scripts/capture.py --repo <repo> literature "<title>" \
+         --reference <ref-key> --locator "p. 12" --body -
+
+   Never paste source prose into a note — verbatim text lives only in `raw/`.
+4. Quick findings that are not yet note-worthy go in `fleeting/` notes
+   (`scripts/capture.py --repo <repo> fleeting "..."`).
 
 ## Where the copy comes from
 
@@ -63,6 +76,10 @@ literature note with a locator, and hand the literature note to the
 synthesizer as usual. Never re-fetch it, never edit its reference note's
 `csl_json` unless the capture proves it wrong, and never cite anything
 still sitting in `drop/`.
+
+The `.txt` extraction carries every page, each marked `--- page N ---`, so
+your locator is the page the passage actually came from — read it there
+rather than guessing.
 
 ## Naming
 

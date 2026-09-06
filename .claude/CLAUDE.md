@@ -1,8 +1,9 @@
 # Working on zettel-bootstrap
 
 Guidance for developing **this skill**. It is not loaded by maintenance runs —
-`ci/setup-environment.sh` clones to `/opt/zettel-skill` and symlinks only
-`skills/` and `agents/`, so nothing here reaches a scheduled cycle's context.
+`ci/setup-environment.sh` clones to `/opt/zettel-skill` and symlinks every
+`skills/*` directory plus `agents/*.md`, so nothing here reaches a scheduled
+cycle's context.
 
 ## What this repo is
 
@@ -17,10 +18,25 @@ variables. `.gitignore` covers `.env`, `*.token`, `*.pem`, `.netrc`, `run.lock`.
 ## Running things
 
 ```sh
-.venv/bin/python -m pytest -q      # 421 tests, ~160s
+.venv/bin/python -m pytest -q      # 537 tests, ~210s
 ./smoke_test.sh                    # pytest + end-to-end scaffold; exit 0 or it isn't done
 claude plugin validate --strict .
 ```
+
+**Pass `PYTHON` as an absolute path** when overriding it (`PYTHON=$PWD/.venv/bin/python
+./smoke_test.sh`). `maintenance_run.sh` runs the headless session from inside the
+*content* repo, so a relative interpreter path resolves against the wrong
+directory and the run dies with exit 127. And never judge the smoke test by a
+piped tail: `fail` exits 1, but a pipe reports the exit status of the last stage.
+Read `EXIT=` or `echo $?` from the script itself.
+
+**Never assert through a pipe under `pipefail`.** `cmd | grep -q X` reports
+*cmd's* exit status, not grep's, so a tool that legitimately exits non-zero (a
+lint finding what you planted) or writes to stderr fails the assertion even
+when the match succeeded. This has bitten twice. Capture first, then match:
+`OUT="$(cmd 2>&1 || true)"; echo "$OUT" | grep -q X || fail "... (got: $OUT)"`
+-- and put the observed value in the failure message, or the next person
+debugs blind.
 
 **`pytest` is not installed in the system python.** `python3 -m pytest` fails
 with `No module named pytest`; the venv at `.venv/` has it. `smoke_test.sh`
@@ -60,7 +76,7 @@ regeneration silently discards.
 the source of truth, and code comments cite it by number.
 
 Deviations are recorded as **numbered amendments** at the top of that file
-(A1–A8 so far). When implementation forces a change to the spec, append the next
+(A1–A12 so far). When implementation forces a change to the spec, append the next
 rather than editing the requirement text: the reasoning is worth more than a
 tidy document. `PLAN.md` tracks phase status and the build order.
 
@@ -113,8 +129,37 @@ tidy document. `PLAN.md` tracks phase status and the build order.
   why it is shaped that way is not. `scripts/capture.py`'s module docstring is
   the model — it explains the failure mode that justifies the tool's existence.
 - **Shared logic goes in `scripts/zettel_lib/`**, never duplicated across entry
-  points. Frontmatter, naming, repo access, HTTP, citations, similarity, and
-  the git lock all live there precisely so the twenty entry points cannot drift.
+  points. Frontmatter, naming, repo access, HTTP, citations, similarity,
+  reference building, and the git lock all live there precisely so the twenty
+  entry points cannot drift. `references.py` is the newest instance and the
+  clearest: `ingest_drops.py` and `capture.py reference` must mint byte-identical
+  artifacts from the same identity, so exactly one of them owns the builder and
+  the other imports it.
+- **`capture.py` is the only writer of notes and inquiries.** Every note type
+  has a generator kind, and each refuses at write time what the lints refuse at
+  gate time. `inquiries.py` stays read-only (A9), so inquiry *writes* live in
+  `capture.py inquiry-update` — it already logs and already rebuilds the
+  manifest, which an inquiry write requires because the manifest indexes
+  `status` and `result_notes`.
+- **The plugin ships four skills**: the `zettel-bootstrap` router plus one
+  sub-skill per session flow (`zettel-ingest`, `zettel-query`, `zettel-ask`).
+  Every one carries only the six portable frontmatter fields — a field outside
+  that set fails packaging, so a drifted sub-skill is one nobody can install —
+  and `ci/setup-environment.sh` links them all, because a sub-skill nobody
+  links is a slash command that does not exist. `tests/test_skills_frontmatter.py`
+  holds both lines.
+- **The session flows live in `session_cycle.sh`**, one script for `ask`,
+  `ingest` and `query`, because all three need the same lock, branch and
+  abort-on-error. Its checklists are rendered templates
+  (`session_*_prompt.md`), like the maintenance prompts: a checklist naming
+  real commands is followed, one naming placeholders is improvised around.
+  Two orderings are load-bearing and tested — `query` opens the branch before
+  filing gaps, and usage errors are settled before any environment check.
+- **`remote_cycle.sh finish` gates before it commits**, and stages *around* the
+  gate run: stage, gate, re-stage. The first staging is what lets the sandbox
+  check see new files (it diffs tracked paths); the second commits the gates'
+  own PASS lines. Drop either and a test will tell you — `test_finish_leaves_a_clean_tree`
+  and `test_finish_gates_see_new_untracked_files` exist for exactly these.
 - **`--allowedTools` must be one quoted comma-separated argument.** Split
   across shell words, space-containing patterns like `Bash(git add:*)` shatter
   and silently deny commits mid-run. `tests/stub_claude` asserts this.

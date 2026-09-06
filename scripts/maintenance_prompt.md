@@ -21,6 +21,10 @@ INBOX entries ("Dropped source ready") name a reference note whose capture
 is in raw/. Work those first, from the capture (Read opens PDFs; the .txt
 beside it is the extraction), and never re-fetch them.
 
+Every note you write goes through a generator, never a hand-written file:
+`capture.py reference|literature|permanent` (and `fleeting`, `inquiry`,
+`inbox`). Each refuses at write time what the lints refuse at gate time.
+
 Step 3. First list the child skills the knowledge base has grown:
     {{PYTHON}} {{SCRIPTS}}/skill_review.py --repo {{REPO}} list
 and Read the SKILL.md of each `approved` skill relevant to the planned work —
@@ -76,11 +80,13 @@ marking something verified that is not.
 Step 9. Rebuild the machine-readable index:
     {{PYTHON}} {{SCRIPTS}}/build_manifest.py --repo {{REPO}}
 
-Step 10. Update INBOX.md and inquiries/ statuses. An inquiry may only be
-marked `answered` with `result_notes` naming the **permanent** notes that
-answered it — lint_links fails otherwise. Leave an unresolved question as
-`in-progress` and say why. Then commit everything on the main branch with one
-message summarizing the run.
+Step 10. Update INBOX.md and inquiries/ statuses with the tool, which
+validates before it writes:
+    {{PYTHON}} {{SCRIPTS}}/capture.py --repo {{REPO}} inquiry-update <key> --status answered --result-notes <permanent-key>
+An inquiry may only be marked `answered` with `result_notes` naming the
+**permanent** notes that answered it — lint_links fails otherwise. Leave an
+unresolved question as `in-progress` and say why (`--note "..."`). Then commit
+everything on the main branch with one message summarizing the run.
 
 HARD RULES for this run:
 - You NEVER run `git push`. The wrapper that launched you re-verifies the
