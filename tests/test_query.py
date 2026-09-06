@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-from conftest import LIT_KEY, MOC_KEY, PERM_KEY, REF_KEY, run_script
+from conftest import LIT_KEY, MOC_KEY, PERM_KEY, REF_KEY, SCRIPTS, run_script
 
 
 def tree_hash(repo) -> str:
@@ -128,6 +128,60 @@ def test_configured_topics_touched_are_reported(clean_repo):
     data = json.loads(report(clean_repo, "zettelkasten method", "--json").stdout)
     assert data["topics"] == ["zettelkasten method"]
     assert MOC_KEY in {m["key"] for m in data["matched"]}
+
+
+# -- the graph (Phase 3) ------------------------------------------------------
+
+def test_edges_distinguish_typed_relations_from_mentions(clean_repo):
+    """The permanent note both cites the reference and mentions it in prose.
+
+    Those are two different facts -- an author choosing `source` from the FR-5
+    set, and a wikilink in a sentence -- so the subgraph carries both.
+    """
+    data = json.loads(report(clean_repo, "atomic notes", "--json").stdout)
+    pairs = {(e["source"], e["target"], e["relation"]) for e in data["edges"]}
+    assert (PERM_KEY, REF_KEY, "source") in pairs
+    assert (PERM_KEY, REF_KEY, "mentions") in pairs
+    assert (PERM_KEY, LIT_KEY, "elaborates") in pairs
+
+
+def test_every_edge_endpoint_is_a_reported_node(clean_repo):
+    """An edge to a note the report never listed would dangle."""
+    data = json.loads(report(clean_repo, "atomic notes", "--json").stdout)
+    listed = {m["key"] for m in data["matched"]} | {c["key"] for c in data["connected"]}
+    for edge in data["edges"]:
+        assert edge["source"] in listed and edge["target"] in listed, edge
+
+
+def test_edges_are_sorted_and_stable(clean_repo):
+    data = json.loads(report(clean_repo, "atomic notes", "--json").stdout)
+    triples = [(e["source"], e["target"], e["relation"]) for e in data["edges"]]
+    assert triples == sorted(triples)
+
+
+def test_moc_membership_names_the_map_that_reaches_a_note(clean_repo):
+    data = json.loads(report(clean_repo, "atomic notes", "--json").stdout)
+    assert data["moc_membership"][PERM_KEY] == [MOC_KEY]
+    assert data["moc_membership"][LIT_KEY] == []
+
+
+def test_moc_membership_and_the_mapping_gap_agree(two_cluster_repo):
+    """One source, so the JSON and the gap cannot disagree about reachability."""
+    data = json.loads(report(two_cluster_repo, "reinvested returns", "--json",
+                             "--top", "1").stdout)
+    key = data["matched"][0]["key"]
+    assert data["moc_membership"][key] == []
+    assert any(key in g for g in data["gaps"] if "map of content" in g)
+
+
+def test_mentions_is_not_an_fr5_relation():
+    """If `mentions` ever reached a note's links block, lint_links would fail it
+    as bad-relation -- so it must stay outside the closed set."""
+    import sys
+    sys.path.insert(0, str(SCRIPTS))
+    from zettel_lib.graph import MENTIONS
+    from zettel_lib.repo import RELATIONS
+    assert MENTIONS not in RELATIONS
 
 
 def test_empty_query_is_a_usage_error(clean_repo):

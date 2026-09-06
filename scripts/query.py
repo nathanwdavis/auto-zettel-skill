@@ -111,6 +111,18 @@ def query(repo: ContentRepo, text: str, top: int = 15) -> dict:
             row["via"] = h.key
             connected.append(row)
 
+    # The subgraph the report actually drew: matched notes plus the notes one
+    # link away. Edges are kept only when BOTH endpoints are in that set -- an
+    # edge to a node the report never listed would dangle, and a reader cannot
+    # look up what is not there.
+    subgraph_keys = {row["key"] for row in matched} | {row["key"] for row in connected}
+    edges = sorted(
+        {e for k in subgraph_keys
+           for e in graph.out_edges(by_key[k], keys, id_to_key)
+           if e.target in subgraph_keys})
+    moc_membership = {k: graph.moc_membership(k, inbound, by_key)
+                      for k in sorted(subgraph_keys)}
+
     # Inquiries are questions about the graph, not nodes in it: match them
     # separately so "already asked" is visible next to "already answered".
     inquiries = []
@@ -153,8 +165,11 @@ def query(repo: ContentRepo, text: str, top: int = 15) -> dict:
         material = [m["key"] for m in matched if m["type"] != "moc"]
         suggest("inbox", f"Distil a permanent note on {text} from: " + ", ".join(material),
                 "the synthesizer's job, not the researcher's")
-    uncovered = [m["key"] for m in matched if m["type"] != "moc"
-                 and not any(by_key[k].type == "moc" for k in inbound[m["key"]])]
+    # Same source as the moc_membership field: two implementations would
+    # eventually disagree about whether a note is reachable from INDEX, which is
+    # the only thing either of them is for.
+    uncovered = [m["key"] for m in matched
+                 if m["type"] != "moc" and not moc_membership[m["key"]]]
     if uncovered:
         gaps.append(f"{len(uncovered)} matched note(s) sit in no map of content, so a "
                     "reader walking down from INDEX cannot find them: "
@@ -178,6 +193,9 @@ def query(repo: ContentRepo, text: str, top: int = 15) -> dict:
         "matched": matched,
         "by_type": by_type,
         "connected": connected,
+        "edges": [{"source": e.source, "target": e.target, "relation": e.relation}
+                  for e in edges],
+        "moc_membership": moc_membership,
         "inquiries": inquiries,
         "topics": touched_topics,
         "gaps": gaps,
