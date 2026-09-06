@@ -38,9 +38,15 @@ fi
 SKILL_REV="$(git -C "$INSTALL_DIR" rev-parse --short HEAD)"
 echo "zettel-bootstrap at revision ${SKILL_REV}"
 
-# Make the skill discoverable to the session.
+# Make every skill discoverable to the session. The plugin ships the router
+# (zettel-bootstrap) plus one sub-skill per session flow -- zettel-ingest,
+# zettel-query, zettel-ask -- and each is a slash command only if it is linked.
+# Loop rather than naming them: a sub-skill added later would otherwise be
+# installed everywhere except the environments that actually run cycles.
 mkdir -p "$HOME/.claude/skills"
-ln -sfn "$INSTALL_DIR/skills/zettel-bootstrap" "$HOME/.claude/skills/zettel-bootstrap"
+for skill in "$INSTALL_DIR"/skills/*/; do
+  ln -sfn "${skill%/}" "$HOME/.claude/skills/$(basename "${skill%/}")"
+done
 
 # Register the agent definitions too. Without this, a remote session has NONE
 # of the eight named agents the maintenance prompts delegate to -- the live
@@ -58,8 +64,12 @@ python3 -m pip install --quiet -r "$INSTALL_DIR/requirements.txt"
 # succeed and still be the wrong ref. Failing loudly here beats failing
 # mid-cycle: a maintenance run without the gates is worse than no run at all,
 # because nothing would stop ungrounded notes from landing.
-[[ -f "$INSTALL_DIR/skills/zettel-bootstrap/SKILL.md" ]] \
-  || { echo "error: SKILL.md missing from ${INSTALL_DIR} -- wrong ref '${ZETTEL_SKILL_REF}'?" >&2; exit 1; }
+for skill in "$INSTALL_DIR"/skills/*/; do
+  [[ -f "${skill}SKILL.md" ]] \
+    || { echo "error: ${skill}SKILL.md missing -- wrong ref '${ZETTEL_SKILL_REF}'?" >&2; exit 1; }
+  [[ -L "$HOME/.claude/skills/$(basename "${skill%/}")" ]] \
+    || { echo "error: skill registration failed for $(basename "${skill%/}")" >&2; exit 1; }
+done
 [[ -d "$INSTALL_DIR/agents" ]] \
   || { echo "error: agents/ missing from ${INSTALL_DIR}" >&2; exit 1; }
 [[ -e "$HOME/.claude/agents/critic.md" ]] \

@@ -4,7 +4,7 @@ description: Scaffolds and perpetually grows a citation-grounded Zettelkasten kn
 license: MIT
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch
 metadata:
-  version: 0.1.0
+  version: 0.2.0
   phase: "4 (skill emergence)"
 ---
 
@@ -25,8 +25,9 @@ Two repositories, never mixed:
 | Situation | Go to |
 |---|---|
 | No content repo exists yet | [Genesis](#genesis) |
-| User asks what the base *already* knows about X (no research) | [Mapping existing knowledge](#mapping-existing-knowledge) |
-| User asks a question and wants it researched now | [Answering a question now](#answering-a-question-now) |
+| User asks what the base *already* knows about X (no research) | [Mapping existing knowledge](#mapping-existing-knowledge) — `/zettel-query` |
+| User asks a question and wants it researched now | [Answering a question now](#answering-a-question-now) — `/zettel-ask` |
+| User hands this session a source to add | [Ingesting a source now](#ingesting-a-source-now) — `/zettel-ingest` |
 | Content repo exists, user wants growth | [Adding knowledge](#adding-knowledge) |
 | User wants to jot a thought or file a question for later | [Capturing input](#capturing-input) |
 | Scheduled/unattended growth | [Maintenance runs](#maintenance-runs) |
@@ -78,6 +79,16 @@ An **inquiry** is an open question, tracked across runs (`new` → `in-progress`
 → `answered` → `archived`). A run works the `new` ones first. List them with
 `scripts/inquiries.py --repo <repo> [--status new] [--json]`.
 
+Move one along with the same tool — it validates before it writes, so a
+refused update leaves the inquiry untouched:
+
+```sh
+scripts/capture.py --repo <repo> inquiry-update <key> --status in-progress
+scripts/capture.py --repo <repo> inquiry-update <key> --status answered \
+  --result-notes <permanent-key>
+scripts/capture.py --repo <repo> inquiry-update <key> --note "why this stalled"
+```
+
 `answered` requires at least one `result_notes` entry pointing at a permanent
 note — the lint enforces it. Closing a question with nothing to point at is how
 a knowledge base quietly stops answering anything.
@@ -95,6 +106,29 @@ the file moves to `raw/` as immutable evidence, a reference note is written
 Crossref), and an INBOX entry asks the run to write the notes. In a session
 you can run it now: `scripts/ingest_drops.py --repo <repo>`. Never cite a
 file still in `drop/`.
+
+## Ingesting a source now
+
+When the user hands this session a file — an attachment, a path on disk —
+one command claims the lock, opens a run branch, captures the source as
+immutable evidence, writes its reference note, and prints the checklist for
+the notes:
+
+```sh
+scripts/session_cycle.sh ingest --repo <repo> --source <file> \
+  [--title "..."] [--author "Family, Given"] [--year 2026] [--doi ...]
+```
+
+Pass whatever identity the user gave; the rest is recovered from the file (a
+DOI on its front pages, the PDF's own metadata). The text extraction carries
+`--- page N ---` markers, so every note you write from it can cite a page.
+
+Exit 1 with `duplicate_of: <key>` means the source is already on file — read
+it rather than adding it twice. Exit 3 means a scheduled run holds the lock:
+stand down.
+
+For a source meant for the *next* cycle rather than this one, `drop/` is still
+the route: see [Dropping a source you obtained yourself](#dropping-a-source-you-obtained-yourself).
 
 ## Mapping existing knowledge
 
@@ -131,6 +165,15 @@ Then commit the captures; from a remote session, push them on a branch and open
 a PR with auto-merge, as in [Answering a question now](#answering-a-question-now),
 so the next scheduled run picks them up.
 
+To file the gaps **and work them now**, in this session:
+
+```sh
+scripts/session_cycle.sh query --repo <repo> --from-query "<X>"
+```
+
+It claims the lock and opens the run branch *before* filing, so the captures
+land in this cycle's PR rather than in a working tree the next run overwrites.
+
 Without a local clone (Mode B): fetch `manifest.json`, match the query
 against `title`/`tags` there, then fetch the best few notes with
 `scripts/fetch_remote.py --keys` and answer from those. Say that the ranking
@@ -143,11 +186,15 @@ is no fast path to `main`, because a fast path to `main` is a path around the
 citation gates.
 
 ```sh
-scripts/adhoc_research.sh --repo <repo> --question "..." [--priority high]
+scripts/session_cycle.sh ask --repo <repo> --question "..." [--priority high]
 ```
 
-That claims the lock, files the question as an inquiry, and creates the run
-branch. **Exit code 3 means a scheduled run holds the lock: stand down and say
+That claims the lock, files the question as an inquiry, creates the run
+branch, and prints a checklist naming every command for the rest of the job.
+(`adhoc_research.sh` is the same cycle under its original name.) **Check
+coverage first** — the checklist opens with a `query.py` call, because
+re-researching what the base already holds is the most expensive mistake
+available here. **Exit code 3 means a scheduled run holds the lock: stand down and say
 so. Never force it** — two sessions researching the same question pay twice.
 
 Then research it, following [Adding knowledge](#adding-knowledge). Two things
@@ -175,23 +222,32 @@ open questions are work the user has already asked for.
 
 For each source:
 
-1. **Capture** the source verbatim into `raw/` with
-   `scripts/fetch_source.py --repo <repo> --ref <key> --url <url>` (after the
-   reference note exists). This is what makes it verifiable. Prefer the
+**Never hand-write a note file.** Every type has a generator, and each refuses
+at write time what the lints refuse at gate time — a duplicate source, a
+relation outside the taxonomy, an unresolvable target, a missing locator:
+
+1. **Reference note** — one per source. It enriches from Crossref, renders the
+   Chicago strings, and verifies through the registries:
+   `scripts/capture.py --repo <repo> reference --doi <doi>` (or `--isbn`,
+   `--arxiv`, `--url`, plus `--title/--author/--year`).
+2. **Capture** the source verbatim into `raw/` with
+   `scripts/fetch_source.py --repo <repo> --ref <key> --url <url>`. This is
+   what makes it verifiable when no identifier resolved. Prefer the
    `verification.open_access` URL `verify_refs.py` records for a DOI; a
    JavaScript shell needs `fetch.renderer` in config.yml or a human-dropped
-   PDF; Academia.edu and ResearchGate are leads, never sources. Never write a
-   reference note for something you did not fetch or cannot look up
-   authoritatively.
-2. **Reference note** (`reference/`) — one per source, from
-   `templates/reference.md`. Fill `csl_json`; leave the Chicago strings empty
-   and let `verify_refs.py` render them. Never hand-write them.
-3. **Literature note** (`literature/`) — your own words, one source, with a
-   locator. Never paste source prose.
-4. **Permanent note** (`permanent/`) — one atomic idea, title stated as a
-   claim, at least one outbound typed link. Every sourced claim links to a
-   verified reference note.
+   PDF; Academia.edu and ResearchGate are leads, never sources. A reference
+   reporting UNVERIFIED needs a capture — never an edited verification block.
+3. **Literature note** — your own words, one source, with a locator:
+   `scripts/capture.py --repo <repo> literature "<title>" --reference <key>
+   --locator "p. 12"`. Never paste source prose.
+4. **Permanent note** — one atomic idea, title stated as a claim, at least one
+   outbound typed link: `scripts/capture.py --repo <repo> permanent "<claim>"
+   --link <key>:elaborates`. Every sourced claim links to a verified
+   reference note.
 5. **MOC** (`moc/`) — link the new note in. `INDEX.md` links only to MOCs.
+
+The `templates/` files remain the reference for what each note type carries;
+they are no longer the way to write one.
 
 ### Naming notes
 
@@ -217,12 +273,22 @@ Run all five, in order, before every commit. **A failing gate means do not
 commit and do not push** — fix the notes instead.
 
 ```sh
+scripts/remote_cycle.sh gates --repo <repo>   # all of them, in CI's order
+```
+
+Or individually, when you want to iterate on one:
+
+```sh
 scripts/verify_refs.py    --repo <repo> --mailto <you@example.org>
 scripts/build_manifest.py --repo <repo>
 scripts/lint_citations.py --repo <repo>   # hard-fails on ungrounded claims
 scripts/lint_links.py     --repo <repo>   # hard-fails on broken/foreign links
 scripts/lint_skills.py    --repo <repo>   # hard-fails on malformed child skills
 ```
+
+`remote_cycle.sh finish` runs the gates itself before committing and refuses to
+push a red branch, so a failure reaches you rather than a PR nobody is left to
+fix.
 
 The maintenance wrapper and the content repo's CI also run
 `check_skill_sandbox.py` over the whole cycle's diff.
