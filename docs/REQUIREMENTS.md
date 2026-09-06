@@ -307,7 +307,7 @@ capture. Four additions, none of which weakens a gate:
   `lint_citations` gains `capture-too-large`. `pypdf` joins the runtime
   dependencies; the ingest degrades to sidecar/filename identity without it.
 
-### A12 — Note generators, the inquiry updater, and gates before the push (2026-09-06, FR-4, FR-6, FR-10, §7)
+### A12 — Session flows: generators, the inquiry updater, gates before the push, and a command per flow (2026-09-06, FR-4, FR-6, FR-10, FR-14, §7, §10)
 
 A6 closed casual human capture by generating well-formed artifacts rather than
 loosening a gate. The same gap was still open from the machine's side: the
@@ -367,6 +367,44 @@ closes it the same way, and fixes two adjacent gaps found with it:
   reference is deleted and reported to the caller (exit 1) rather than marked
   in place with an INBOX entry: nothing was handed to a future run, so there is
   nothing to tell one.
+
+Phase 2 turned those foundations into the three flows a session actually
+performs, and gave each one a name a user can invoke:
+
+- **`scripts/session_cycle.sh <ask|ingest|query>`** owns lock, branch, and
+  abort-on-error for all three, and renders a per-mode checklist
+  (`session_{ask,ingest,query}_prompt.md`) with the repo's real paths
+  substituted in, exactly as the maintenance prompts are rendered. A checklist
+  of placeholders is improvised around; one of real commands is run. Only
+  `ask` existed before (as `adhoc_research.sh`, now a thin wrapper preserving
+  its `branch:`/`inquiry:`/exit-code contract): ingesting a handed source and
+  working a query's gaps were prose in SKILL.md, re-sequenced from memory every
+  time. Two orderings inside it are load-bearing. `query` claims the lock and
+  opens the branch **before** filing gaps, because filing first would put the
+  captures on whatever branch was checked out and `start`'s own checkout would
+  strand them. And every usage error is settled before any environment check,
+  so a missing flag reports as a usage error rather than as whatever the
+  environment complains about first.
+- **Three sub-skills** -- `skills/zettel-{ingest,query,ask}/SKILL.md` -- give
+  each flow a slash command (`/zettel-bootstrap:zettel-query` through the
+  plugin, `/zettel-query` through the symlink route). Each carries only the six
+  portable FR-14 frontmatter fields, consumes `$ARGUMENTS`, resolves the plugin
+  root through `CLAUDE_PLUGIN_ROOT` (falling back to `readlink -f` for the
+  symlink route), and routes into the scripts rather than restating the flow in
+  prose, which would drift. Their descriptions delineate against each other:
+  three overlapping skills with no stated boundary trigger on each other's
+  requests. `ci/setup-environment.sh` now links **every** `skills/*` directory,
+  since a sub-skill nobody links is a slash command that does not exist.
+- **The orchestra moved onto the generators.** `researcher.md` creates
+  reference and literature notes with `capture.py` instead of from
+  `templates/`; `synthesizer.md` uses `capture.py permanent` and carries the
+  quotation rule (a short quote belongs in a permanent note beside its
+  reference link, never in a literature note); `orchestrator.md` does gap
+  analysis with `query.py --json`, which is read-only and free. Both
+  maintenance prompts route step 8 through `remote_cycle.sh gates` and step 10
+  through `capture.py inquiry-update`. The `templates/` files remain the
+  reference for what each note type carries; they are no longer the way to
+  write one.
 
 -----
 

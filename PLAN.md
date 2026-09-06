@@ -3,7 +3,7 @@
 **Source of truth:** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (all FR-x / AC-x / NFR-x / QA-x / checklist references below point there). Deviations forced by implementation are recorded there as numbered amendments — **A1–A12** so far.
 **Working on this repo:** [`.claude/CLAUDE.md`](.claude/CLAUDE.md) — how to run the suite, the environment's sharp edges, and the conventions.
 **This repo:** the skill repo. It contains ONLY the `zettel-bootstrap` plugin — never zettelkasten content. The content repo is created at genesis runtime by `init_content_repo.sh` and is out of scope for this repo's file tree. Both repos are public (A4); nothing here may contain a secret (NFR-4).
-**Status:** All phases complete — 1, 2, 3, 3.5, 3.6 (PR #5), 4 (PR #6) — plus two rounds of field fixes from live scheduled runs: issue #7 → PR #8 (amendment A8), and the stale-install/frozen-prompt round → PR #10. Every §12 checklist item passes. **Round 8 (session flows): Phase 1 shipped (amendment A12); Phases 2 and 3 planned** — see its section in §2. What else remains is operational, not code: see **Handoff — next steps** at the end of §2.
+**Status:** All phases complete — 1, 2, 3, 3.5, 3.6 (PR #5), 4 (PR #6) — plus two rounds of field fixes from live scheduled runs: issue #7 → PR #8 (amendment A8), and the stale-install/frozen-prompt round → PR #10. Every §12 checklist item passes. **Round 8 (session flows): Phases 1 and 2 shipped (amendment A12); Phase 3 planned** — see its section in §2. What else remains is operational, not code: see **Handoff — next steps** at the end of §2.
 
 ---
 
@@ -352,7 +352,7 @@ no pypdf / sandbox gate on the move); `start` and the wrapper ingest a drop;
 OA lookup is enrichment (an unreachable OA registry never blocks Crossref);
 a shell with `renderer: none` is never saved.
 
-### Post-Phase-4 round 8 — session flows, by layer  🔨 Phase 1 shipped; 2 and 3 planned
+### Post-Phase-4 round 8 — session flows, by layer  🔨 Phases 1-2 shipped; 3 planned
 *Amendment A12 (to be appended when Phase 2 ships). Exit gate: each of the
 three session use cases runs end to end from one slash command with no
 hand-written frontmatter and no hand-sequenced lock/branch/gate steps.*
@@ -419,7 +419,7 @@ What Phase 1 taught, kept for whoever builds on it:
   from inside the content repo, so a relative interpreter path dies with exit
   127 several steps later, where it looks like a stub-binary problem.
 
-**Phase 2 -- flows, entry point, sub-skills, docs**
+**Phase 2 -- flows, entry point, sub-skills, docs  ✅ shipped** (504 tests, smoke exit 0, strict validate clean)
 6. `scripts/session_cycle.sh <ask|ingest|query>`: one script owns lock,
    branch, abort-on-error, and prints a rendered checklist per mode
    (`session_*_prompt.md`, sed-rendered like the maintenance prompts).
@@ -436,6 +436,28 @@ What Phase 1 taught, kept for whoever builds on it:
    `orchestrator.md`, both maintenance prompts' steps 8 and 10); README,
    `references/{capture,note-types,quality-gates,query}.md`; amendment A12;
    plugin version 0.2.0.
+
+What Phase 2 taught:
+
+- **Validate usage before the environment.** Making `adhoc_research.sh` a
+  wrapper reordered its checks, and an existing test caught it instantly: a
+  caller who omitted `--question` was told the directory was not a git
+  repository. Usage errors (exit 2) come first, environment checks (exit 1)
+  second, the lock last.
+- **Keep stdout and stderr apart when stdout is parsed.** The ingest path
+  merged them, so a failure made the JSON unparseable exactly when the caller
+  needed the reason. Capture stderr to a temp file instead.
+- **f-strings cannot contain backslashes** in Python 3.11, which bites when
+  writing inline `python -c` inside a shell heredoc. Use `.format()` there.
+- **The pipefail assertion trap, again.** `cmd | grep -q X` under `pipefail`
+  reports *cmd's* status, so a smoke assertion failed on a `status` call that
+  matched but exited non-zero. Same shape as the Phase 1 lint case. Capture
+  the output, match against the variable, and name the observed value in the
+  failure message.
+- **A checklist is the deliverable.** The scripts do bookkeeping; what makes
+  the flow reproducible is the rendered list of concrete commands. Tests assert
+  no `{{` survives substitution, because a leaked placeholder is a step the
+  session will improvise.
 
 **Phase 3 -- graph and gaps**
 9. `query.py --from-file PATH`: passage mode over a capture's `.txt` --

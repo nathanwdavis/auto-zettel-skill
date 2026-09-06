@@ -41,7 +41,8 @@ for s in build_manifest.py lint_citations.py lint_links.py verify_refs.py fetch_
   "$PY" "scripts/$s" --help >/dev/null 2>&1 || fail "scripts/$s --help"
   pass "scripts/$s --help"
 done
-for sh_script in init_content_repo.sh maintenance_run.sh new_worktree.sh adhoc_research.sh; do
+for sh_script in init_content_repo.sh maintenance_run.sh new_worktree.sh adhoc_research.sh \
+                 session_cycle.sh remote_cycle.sh; do
   bash "scripts/$sh_script" --help >/dev/null || fail "$sh_script --help"
   pass "scripts/$sh_script --help"
 done
@@ -328,6 +329,88 @@ pass "--file ingested an attachment with page-marked full text, leaving the orig
 bash scripts/remote_cycle.sh gates --repo "$KB" 2>/dev/null | grep -q "gates: PASS" \
   || fail "remote_cycle.sh gates on a clean repo"
 pass "remote_cycle.sh gates ran the merge gates"
+
+# A12 phase 2: the three session flows. Each claims the same lock, opens the
+# same kind of run branch, and prints a checklist naming real commands.
+SKB="$WORK/kb-session"
+git clone -q "$RORIGIN" "$SKB"
+git -C "$SKB" remote set-head origin -a >/dev/null 2>&1 || true
+
+"$PY" - "$WORK" <<'SRCPY'
+import sys
+sys.path.insert(0, "tests"); sys.path.insert(0, "scripts")
+from pathlib import Path
+from conftest import make_pdf
+Path(sys.argv[1], "handed.pdf").write_bytes(
+    make_pdf(pages=["A handed smoke source", "Page two of the handed source"]))
+SRCPY
+
+SESSION_OUT="$(ZETTEL_RUN_HOLDER=session bash scripts/session_cycle.sh ingest \
+  --repo "$SKB" --source "$WORK/handed.pdf" --title "A Handed Smoke Source" \
+  --author "Smoke, Sam" --year 2026)" || fail "session_cycle.sh ingest"
+echo "$SESSION_OUT" | grep -q "^branch: zettel/run-" || fail "ingest printed no run branch"
+echo "$SESSION_OUT" | grep -q "^reference: a-handed-smoke-source--" || fail "ingest printed no reference"
+echo "$SESSION_OUT" | grep -q -- "--- page N ---" || fail "ingest checklist omits page locators"
+echo "$SESSION_OUT" | grep -q "{{" && fail "ingest checklist has unsubstituted placeholders"
+[[ -f "$WORK/handed.pdf" ]] || fail "ingest consumed the caller's file"
+bash scripts/remote_cycle.sh gates --repo "$SKB" >/dev/null 2>&1 || fail "gates after session ingest"
+pass "session_cycle.sh ingest captured a handed source and printed a real checklist"
+
+bash scripts/remote_cycle.sh abort --repo "$SKB" >/dev/null 2>&1 || true
+git -C "$SKB" checkout -q main; git -C "$SKB" checkout -q -- .; git -C "$SKB" clean -qfd
+QUERY_OUT="$(ZETTEL_RUN_HOLDER=session bash scripts/session_cycle.sh query \
+  --repo "$SKB" --from-query "quantum chromodynamics")" || fail "session_cycle.sh query"
+QBRANCH="$(echo "$QUERY_OUT" | sed -n 's/^branch: //p')"
+[[ -n "$QBRANCH" ]] || fail "query mode printed no branch"
+[[ "$(git -C "$SKB" branch --show-current)" == "$QBRANCH" ]] \
+  || fail "query filed its gaps off the run branch"
+ls "$SKB"/inquiries/quantum-chromodynamics--*.md >/dev/null 2>&1 \
+  || fail "query did not file the research gap"
+bash scripts/remote_cycle.sh gates --repo "$SKB" >/dev/null 2>&1 || fail "gates after filed gaps"
+pass "session_cycle.sh query filed its gaps ON the run branch, gate-clean"
+
+bash scripts/remote_cycle.sh abort --repo "$SKB" >/dev/null 2>&1 || true
+git -C "$SKB" checkout -q main; git -C "$SKB" checkout -q -- .; git -C "$SKB" clean -qfd
+
+# A source already on file must be NAMED, not ingested twice -- and the lock
+# handed back, because "already have it" is an answer, not a failure. The first
+# copy is committed on main so `start`'s checkout still sees it.
+"$PY" scripts/ingest_drops.py --repo "$SKB" --file "$WORK/handed.pdf" \
+  --title "An Identified Source" --isbn 9781542866507 --offline >/dev/null \
+  || fail "seeding the duplicate check"
+git -C "$SKB" add -A
+git -C "$SKB" -c user.name=t -c user.email=t@localhost commit -qm "seed a source" \
+  || fail "committing the seeded source"
+DUP_OUT="$(ZETTEL_RUN_HOLDER=session bash scripts/session_cycle.sh ingest \
+  --repo "$SKB" --source "$WORK/handed.pdf" --title "Dup" --isbn 9781542866507 2>/dev/null)" \
+  && fail "a duplicate source should exit non-zero"
+echo "$DUP_OUT" | grep -q "^duplicate_of: an-identified-source--" \
+  || fail "duplicate did not name the existing note (got: $DUP_OUT)"
+DUP_STATUS="$(bash scripts/remote_cycle.sh status --repo "$SKB" 2>&1 || true)"
+echo "$DUP_STATUS" | grep -q "lock: free" \
+  || fail "a duplicate ingest left the lock held (status: $DUP_STATUS)"
+[[ -f "$WORK/handed.pdf" ]] || fail "the duplicate attempt consumed the caller's file"
+pass "a duplicate source is named, not ingested, and the lock is handed back"
+
+# Every skill must be portable and linked, or its slash command does not exist.
+"$PY" - <<'SKILLPY' || fail "skill frontmatter"
+import sys, yaml
+from pathlib import Path
+portable = {"name", "description", "license", "compatibility", "metadata", "allowed-tools"}
+found = []
+for skill in sorted(Path("skills").iterdir()):
+    md = skill / "SKILL.md"
+    assert md.is_file(), f"{skill.name}: no SKILL.md"
+    meta = yaml.safe_load(md.read_text(encoding="utf-8").split("---\n")[1])
+    extra = set(meta) - portable
+    assert not extra, f"{skill.name}: non-portable frontmatter {sorted(extra)}"
+    assert meta["name"] == skill.name, f"{skill.name}: name mismatch"
+    assert len(meta["description"]) <= 1024, f"{skill.name}: description too long"
+    found.append(skill.name)
+assert {"zettel-bootstrap", "zettel-ingest", "zettel-query", "zettel-ask"} <= set(found), found
+SKILLPY
+grep -q 'skills/\*/' ci/setup-environment.sh || fail "setup script does not link every skill"
+pass "all four skills carry portable frontmatter and are linked by the setup script"
 
 # Ad-hoc research shares the lock with scheduled runs and never reaches main.
 AKB="$WORK/kb-adhoc"

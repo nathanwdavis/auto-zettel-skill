@@ -11,7 +11,47 @@ have to — so the input paths need their own design.
 | Jot a thought before it evaporates | `capture.py … fleeting` | `fleeting/`, swept next cycle |
 | Ask a question for a run to work later | `capture.py … inquiry` | `inquiries/`, worked next cycle |
 | Give a run feedback or an instruction | `capture.py … inbox`, or edit `INBOX.md` | `INBOX.md`, read first each cycle |
-| Get an answer **now** | `adhoc_research.sh` | a run branch, gated by CI |
+| Get an answer **now** | `session_cycle.sh ask` | a run branch, gated by CI |
+| Add a source **now** | `session_cycle.sh ingest --source` | a run branch, gated by CI |
+| Close the gaps a query found **now** | `session_cycle.sh query --from-query` | a run branch, gated by CI |
+
+## The three session flows
+
+```sh
+scripts/session_cycle.sh ask    --repo <repo> --question "..."
+scripts/session_cycle.sh ingest --repo <repo> --source <file> [--title ...] [--doi ...]
+scripts/session_cycle.sh query  --repo <repo> --from-query "..."
+```
+
+Different work, identical handling: each claims the same lock a scheduled
+cycle claims, opens the same kind of `zettel/run-*` branch, and hands off
+through the same PR and required check. There is no fast path to `main`,
+because a fast path to `main` is a path around the citation gates. Exit 3 from
+any of them means a live run holds the lock — stand down; never force it.
+
+Each then prints a **checklist naming the concrete commands** for the rest of
+the job, rendered with this repo's real paths the way the maintenance prompts
+are. That is the point of the script: a checklist of placeholders gets
+improvised around, one of real commands gets run.
+
+- **`ask`** files the question as an inquiry *before* any research, so an
+  interrupted session still leaves the question behind. Its checklist opens
+  with a coverage check, because re-researching what the base already holds is
+  the most expensive mistake available.
+- **`ingest`** copies the file in (never consuming the caller's), captures it
+  into `raw/`, writes the reference note, and hands over the page-marked text.
+  A source already on file exits 1 with `duplicate_of: <key>` and releases the
+  lock — that is an answer, not a failure.
+- **`query`** claims the lock and opens the branch **before** filing the gaps.
+  The order is the whole reason it exists: filing first would put the captures
+  on whatever branch was checked out, and `start`'s own checkout would strand
+  them. Nothing worth filing means no cycle: it releases the lock and says so.
+
+Each flow is also a slash command — `/zettel-ask`, `/zettel-ingest`,
+`/zettel-query` — through the sub-skills under `skills/`.
+
+`adhoc_research.sh` remains as `session_cycle.sh ask` under its original name,
+with its output contract unchanged.
 
 ### The note generators (A12)
 
@@ -213,12 +253,12 @@ becomes `<stem>.too-large.pdf`; both get an INBOX entry. Nothing in
 ## Ad-hoc research
 
 ```sh
-scripts/adhoc_research.sh --repo <repo> --question "..." [--priority high] [--body -]
+scripts/session_cycle.sh ask --repo <repo> --question "..." [--priority high] [--body -]
 ```
 
-This does bookkeeping only — the research is the session's work. What it
-guarantees is that an ad-hoc answer arrives by exactly the same road as a
-scheduled one:
+This does bookkeeping and instruction — the research is the session's work.
+What it guarantees is that an ad-hoc answer arrives by exactly the same road
+as a scheduled one:
 
 1. **Same lock.** It calls `remote_cycle.sh start`, so an ad-hoc session and a
    scheduled cycle can never both be writing. **Exit 3 means a live run holds

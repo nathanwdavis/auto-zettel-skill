@@ -167,17 +167,44 @@ with one suggested follow-up per gap as a ready-to-run `capture.py` command.
 Add `--file-gaps` (or tell the session to) and it captures them all for the
 next run. Details: [`references/query.md`](references/query.md).
 
-### Ad-hoc research — answering a question now
+### Session flows — answer, ingest, or close gaps now
 
 ```sh
-scripts/adhoc_research.sh --repo <content-repo> --question "..." --priority high
+scripts/session_cycle.sh ask    --repo <content-repo> --question "..."
+scripts/session_cycle.sh ingest --repo <content-repo> --source ~/paper.pdf --title "..."
+scripts/session_cycle.sh query  --repo <content-repo> --from-query "..."
 ```
 
-Claims the same lock as a scheduled cycle, files the question as an inquiry,
-and opens a run branch. Research, then hand off with `remote_cycle.sh finish`:
-the answer reaches `main` only through the required check, exactly like
-scheduled work. Exit 3 means a scheduled run holds the lock — stand down, do
-not force it. Details: [`references/capture.md`](references/capture.md).
+Three kinds of work, one handling: each claims the same lock a scheduled cycle
+claims, opens the same `zettel/run-*` branch, and hands off through the same PR
+and required check. Then each prints a checklist naming the concrete commands
+for the rest of the job — with this repo's real paths substituted in, the way
+the maintenance prompts are rendered.
+
+`ask` files the question before researching, so an interrupted session leaves
+it behind. `ingest` copies a source in (never consuming the caller's file),
+captures it, writes its reference note, and hands over page-marked text; a
+source already on file exits 1 naming it. `query` opens the branch *before*
+filing its gaps, so the captures land in that cycle's PR rather than in a
+working tree the next run overwrites.
+
+Exit 3 from any of them means a scheduled run holds the lock — stand down, do
+not force it. `adhoc_research.sh` is `session_cycle.sh ask` under its original
+name. Details: [`references/capture.md`](references/capture.md).
+
+### Slash commands
+
+Each flow is a sub-skill, so it is invocable directly:
+
+| Command | Does |
+|---|---|
+| `/zettel-ingest <file>` | add a source the user handed the session, then write its notes |
+| `/zettel-query <topic>` | map what the base already knows, and name the gaps |
+| `/zettel-ask <question>` | research it now, through the lock and the gates |
+
+Through the plugin they are namespaced (`/zettel-bootstrap:zettel-query`);
+through the `~/.claude/skills` symlink route they are bare. `ci/setup-environment.sh`
+links every skill, so cloud sessions get all four.
 
 ### Maintenance — scheduled, unattended growth
 

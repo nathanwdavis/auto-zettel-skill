@@ -1,8 +1,9 @@
 # Working on zettel-bootstrap
 
 Guidance for developing **this skill**. It is not loaded by maintenance runs —
-`ci/setup-environment.sh` clones to `/opt/zettel-skill` and symlinks only
-`skills/` and `agents/`, so nothing here reaches a scheduled cycle's context.
+`ci/setup-environment.sh` clones to `/opt/zettel-skill` and symlinks every
+`skills/*` directory plus `agents/*.md`, so nothing here reaches a scheduled
+cycle's context.
 
 ## What this repo is
 
@@ -17,7 +18,7 @@ variables. `.gitignore` covers `.env`, `*.token`, `*.pem`, `.netrc`, `run.lock`.
 ## Running things
 
 ```sh
-.venv/bin/python -m pytest -q      # 479 tests, ~180s
+.venv/bin/python -m pytest -q      # 504 tests, ~190s
 ./smoke_test.sh                    # pytest + end-to-end scaffold; exit 0 or it isn't done
 claude plugin validate --strict .
 ```
@@ -28,6 +29,14 @@ claude plugin validate --strict .
 directory and the run dies with exit 127. And never judge the smoke test by a
 piped tail: `fail` exits 1, but a pipe reports the exit status of the last stage.
 Read `EXIT=` or `echo $?` from the script itself.
+
+**Never assert through a pipe under `pipefail`.** `cmd | grep -q X` reports
+*cmd's* exit status, not grep's, so a tool that legitimately exits non-zero (a
+lint finding what you planted) or writes to stderr fails the assertion even
+when the match succeeded. This has bitten twice. Capture first, then match:
+`OUT="$(cmd 2>&1 || true)"; echo "$OUT" | grep -q X || fail "... (got: $OUT)"`
+-- and put the observed value in the failure message, or the next person
+debugs blind.
 
 **`pytest` is not installed in the system python.** `python3 -m pytest` fails
 with `No module named pytest`; the venv at `.venv/` has it. `smoke_test.sh`
@@ -132,6 +141,20 @@ tidy document. `PLAN.md` tracks phase status and the build order.
   `capture.py inquiry-update` — it already logs and already rebuilds the
   manifest, which an inquiry write requires because the manifest indexes
   `status` and `result_notes`.
+- **The plugin ships four skills**: the `zettel-bootstrap` router plus one
+  sub-skill per session flow (`zettel-ingest`, `zettel-query`, `zettel-ask`).
+  Every one carries only the six portable frontmatter fields — a field outside
+  that set fails packaging, so a drifted sub-skill is one nobody can install —
+  and `ci/setup-environment.sh` links them all, because a sub-skill nobody
+  links is a slash command that does not exist. `tests/test_skills_frontmatter.py`
+  holds both lines.
+- **The session flows live in `session_cycle.sh`**, one script for `ask`,
+  `ingest` and `query`, because all three need the same lock, branch and
+  abort-on-error. Its checklists are rendered templates
+  (`session_*_prompt.md`), like the maintenance prompts: a checklist naming
+  real commands is followed, one naming placeholders is improvised around.
+  Two orderings are load-bearing and tested — `query` opens the branch before
+  filing gaps, and usage errors are settled before any environment check.
 - **`remote_cycle.sh finish` gates before it commits**, and stages *around* the
   gate run: stage, gate, re-stage. The first staging is what lets the sandbox
   check see new files (it diffs tracked paths); the second commits the gates'
