@@ -5,7 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 
-from conftest import LIT_KEY, MOC_KEY, PERM_KEY, REF_KEY, SCRIPTS, run_script
+from zettel_lib.frontmatter import Note
+
+from conftest import (LIT_KEY, MOC_KEY, PERM_KEY, REF_KEY, SCRIPTS, load, rules,
+                      run_script)
 
 
 def tree_hash(repo) -> str:
@@ -353,6 +356,134 @@ def test_a_query_shaped_gap_selection_is_refused_and_writes_nothing(clean_repo):
 def test_negative_gap_cap_is_a_usage_error(clean_repo):
     assert run_script("query.py", clean_repo, "atomic notes",
                       "--gaps", "-1").returncode == 2
+
+
+# -- the five new gap kinds (Phase 3) -----------------------------------------
+
+def kinds(repo, *args) -> dict:
+    data = json.loads(report(repo, *args, "--json").stdout)
+    return {d["kind"]: d for d in data["gap_details"]}
+
+
+def test_unsummarised_reference_is_a_source_nobody_read(clean_repo):
+    """A capture on file that no literature note summarises is reading, not
+    research -- so it files an INBOX entry, never an inquiry."""
+    result = run_script("capture.py", clean_repo, "reference", "Zettelkasten in practice",
+                        "--url", "https://example.org/zk", "--source-tier",
+                        "reputable-secondary", "--offline")
+    assert result.returncode == 0, result.stderr
+    gap = kinds(clean_repo, "zettelkasten")["unsummarised-reference"]
+    assert "no literature note summarises it" in gap["text"]
+    data = json.loads(report(clean_repo, "zettelkasten", "--json").stdout)
+    detail = next(d for d in data["gap_details"] if d["kind"] == "unsummarised-reference")
+    suggestion = data["suggestions"][detail["suggestion"]]
+    assert suggestion["kind"] == "inbox"
+    assert "do not re-fetch" in suggestion["title"]
+
+
+def test_weak_sourcing_agrees_with_the_lint(clean_repo):
+    """The gap and lint_citations' warning are one predicate, so they cannot
+    disagree -- and the lint still exits 0, because this is advisory."""
+    ref = load(clean_repo, f"reference/{REF_KEY}.md")
+    ref.meta["source_tier"] = "general-web"
+    ref.save()
+    assert "weak-sourcing" in kinds(clean_repo, "atomic notes")
+    lint = run_script("lint_citations.py", clean_repo)
+    assert lint.returncode == 0, "weak sourcing is a warning, not a violation"
+    assert "weak-sourcing" in lint.stderr
+
+
+def test_weak_sourcing_files_an_inquiry_because_the_source_is_not_held(clean_repo):
+    ref = load(clean_repo, f"reference/{REF_KEY}.md")
+    ref.meta["source_tier"] = "general-web"
+    ref.save()
+    data = json.loads(report(clean_repo, "atomic notes", "--json").stdout)
+    detail = next(d for d in data["gap_details"] if d["kind"] == "weak-sourcing")
+    assert data["suggestions"][detail["suggestion"]]["kind"] == "inquiry"
+
+
+def test_an_uncited_claim_is_a_warning_not_a_gap(clean_repo):
+    """A gate's finding is the gate's to report. Gaps have suggestions;
+    warnings do not."""
+    perm = load(clean_repo, f"permanent/{PERM_KEY}.md")
+    perm.body = 'Ahrens argues that "notes compound", according to the slip-box.\n'
+    perm.meta["links"] = [{"target_id": LIT_KEY, "relation": "elaborates"}]
+    perm.save()
+    data = json.loads(report(clean_repo, "atomic notes", "--json").stdout)
+    assert any("makes a sourced claim" in w for w in data["warnings"])
+    assert not any(d["kind"] == "weak-sourcing" for d in data["gap_details"])
+    assert "uncited-claim" in rules(run_script("lint_citations.py", clean_repo))
+
+
+def test_orphan_claim_is_inbound_not_outbound(clean_repo):
+    """lint_links already fails a claim with no OUTBOUND link, so only the
+    inbound direction can find anything a gate does not already catch."""
+    result = run_script("capture.py", clean_repo, "permanent",
+                        "Atomic notes resist bit rot", "--link", f"{REF_KEY}:source")
+    assert result.returncode == 0, result.stderr
+    gap = kinds(clean_repo, "atomic notes resist bit rot")["orphan-claim"]
+    assert "no inbound link" in gap["text"]
+    # the fixture's own permanent note is reached by the MOC, so it is not one
+    assert PERM_KEY not in gap["keys"]
+    assert run_script("lint_links.py", clean_repo).returncode == 0
+
+
+def test_stale_inquiry_uses_the_configured_threshold(clean_repo):
+    run_script("capture.py", clean_repo, "inquiry", "Do atomic notes compound?")
+    inq = next((clean_repo / "inquiries").glob("*.md"))
+    note = Note.load(inq)
+    note.meta["created"] = note.meta["updated"] = "2020-01-01"
+    note.save()
+    assert "stale-inquiry" in kinds(clean_repo, "atomic notes")
+
+    cfg = (clean_repo / "config.yml").read_text(encoding="utf-8")
+    (clean_repo / "config.yml").write_text(
+        cfg + "\nquery:\n  stale_inquiry_days: 100000\n", encoding="utf-8")
+    assert "stale-inquiry" not in kinds(clean_repo, "atomic notes")
+
+
+def test_stale_inquiry_files_an_inbox_entry_not_a_second_inquiry(clean_repo):
+    run_script("capture.py", clean_repo, "inquiry", "Do atomic notes compound?")
+    note = Note.load(next((clean_repo / "inquiries").glob("*.md")))
+    note.meta["created"] = note.meta["updated"] = "2020-01-01"
+    note.save()
+    data = json.loads(report(clean_repo, "atomic notes", "--json").stdout)
+    detail = next(d for d in data["gap_details"] if d["kind"] == "stale-inquiry")
+    suggestion = data["suggestions"][detail["suggestion"]]
+    assert suggestion["kind"] == "inbox", "asking the question twice is not progress"
+    assert "Work or archive" in suggestion["title"]
+
+
+def test_an_unparseable_inquiry_date_is_not_a_stale_inquiry(clean_repo):
+    """build_manifest is the gate for malformed frontmatter; a query is not."""
+    run_script("capture.py", clean_repo, "inquiry", "Do atomic notes compound?")
+    note = Note.load(next((clean_repo / "inquiries").glob("*.md")))
+    note.meta["created"] = note.meta["updated"] = "not a date"
+    note.save()
+    assert "stale-inquiry" not in kinds(clean_repo, "atomic notes")
+
+
+def test_raw_mentions_are_opt_in_and_change_the_follow_up(clean_repo):
+    """A term the notes lack but a capture holds is distillation, not research:
+    filing an inquiry would send a researcher after a source already on disk."""
+    (clean_repo / "raw" / "202608301000-extra.txt").write_text(
+        "The slip-box rewards serendipity in unplanned juxtaposition.\n", encoding="utf-8")
+    assert "raw-mentions" not in kinds(clean_repo, "serendipity")
+
+    found = kinds(clean_repo, "serendipity", "--include-raw")["raw-mentions"]
+    assert "raw/202608301000-extra.txt" in found["keys"]
+    data = json.loads(report(clean_repo, "serendipity", "--include-raw", "--json").stdout)
+    suggestion = data["suggestions"][found["suggestion"]]
+    assert suggestion["kind"] == "inbox"
+    assert "already on file" in suggestion["title"]
+
+
+def test_raw_mentions_are_deterministic(clean_repo):
+    (clean_repo / "raw" / "202608301000-extra.txt").write_text(
+        "The slip-box rewards serendipity.\n", encoding="utf-8")
+    a = report(clean_repo, "serendipity", "--include-raw", "--json").stdout
+    b = report(clean_repo, "serendipity", "--include-raw", "--json").stdout
+    assert a == b
 
 
 def test_empty_query_is_a_usage_error(clean_repo):

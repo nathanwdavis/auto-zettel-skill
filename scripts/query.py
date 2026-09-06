@@ -15,8 +15,8 @@ TF-IDF the serendipity sweep uses (``zettel_lib.similarity``), applied query
 vs. note instead of note vs. note; titles and tags are weighted above bodies
 because a permanent note's title is its claim.
 
-    query.py --repo <path> "<query>" [--top N] [--gaps N] [--json] [--mermaid]
-             [--file-gaps [g1,g3]]
+    query.py --repo <path> "<query>" [--top N] [--gaps N] [--include-raw]
+             [--json] [--mermaid] [--file-gaps [g1,g3]]
 
 A query is not an operation, so nothing is appended to log.md (A9). The one
 exception is explicit: ``--file-gaps`` turns the report's suggested
@@ -28,6 +28,7 @@ have it done. That IS an operation, and it logs like one.
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import re
 import shlex
@@ -38,10 +39,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import capture
+import lint_citations
 from zettel_lib import graph, similarity
 from zettel_lib.cli import EXIT_OK, EXIT_USAGE, base_parser, open_repo
 from zettel_lib.frontmatter import FrontmatterError, Note
-from zettel_lib.repo import ContentRepo, ContentRepoError, dig
+from zettel_lib.repo import (STRONG_TIERS, WEAK_TIER, ContentRepo, ContentRepoError,
+                             dig, stale_inquiry_days)
 
 TYPE_ORDER = ("permanent", "literature", "reference", "moc", "fleeting")
 
@@ -115,6 +118,58 @@ def doc_text(note: Note) -> str:
     return "\n".join(parts)
 
 
+#: How many captures a raw-mentions gap names before it says "...". Enough to
+#: act on, few enough that the line stays readable; the count is always given.
+RAW_NAMED = 3
+
+
+def age_in_days(note: Note) -> float | None:
+    """Days since a note was last touched, or None when it cannot be told.
+
+    `updated` is what inquiry-update bumps, so it is the honest "last worked"
+    stamp; `created` is the fallback for a note nothing has touched since. A
+    date that will not parse yields None rather than raising: build_manifest is
+    the gate for malformed frontmatter, and a query is not a gate.
+    """
+    for field in ("updated", "created"):
+        raw = str(note.meta.get(field) or "").strip()
+        if not raw:
+            continue
+        try:
+            stamp = _dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=_dt.timezone.utc)
+        return (_dt.datetime.now(_dt.timezone.utc) - stamp).total_seconds() / 86400
+    return None
+
+
+def raw_mentions(repo: ContentRepo, terms: list[str]) -> dict[str, list[str]]:
+    """Which raw/ captures use each term, for terms no NOTE uses.
+
+    The point is not that the term appears somewhere -- it is that the base
+    already holds a source for it, so the follow-up is distillation rather than
+    research. Filing an inquiry here would send a researcher to re-fetch what is
+    already on disk.
+
+    Tokenised rather than substring-matched, so the term set agrees with the
+    scorer that produced `missing` in the first place; sorted, so two runs over
+    an unchanged repo agree.
+    """
+    wanted = set(terms)
+    hits: dict[str, list[str]] = {t: [] for t in wanted}
+    for path in sorted((repo.root / "raw").glob("*.txt")):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        present = wanted & set(similarity.tokenize(text))
+        for term in present:
+            hits[term].append(repo.rel(path))
+    return {t: v for t, v in hits.items() if v}
+
+
 def rank_gaps(found: list[Gap], cap: int = 0) -> tuple[list[str], list[dict], list[dict]]:
     """Order the gaps, number them, and collect the follow-ups they point at.
 
@@ -153,7 +208,8 @@ def rank_gaps(found: list[Gap], cap: int = 0) -> tuple[list[str], list[dict], li
     return gaps, details, suggestions
 
 
-def query(repo: ContentRepo, text: str, top: int = 15, *, gap_cap: int = 0) -> dict:
+def query(repo: ContentRepo, text: str, top: int = 15, *, gap_cap: int = 0,
+          include_raw: bool = False) -> dict:
     notes, warnings = load_notes(repo)
     by_key = {n.key: n for n in notes if n.key}
     id_to_key = {n.id: n.key for n in notes if n.id and n.key}
@@ -230,7 +286,8 @@ def query(repo: ContentRepo, text: str, top: int = 15, *, gap_cap: int = 0) -> d
             inquiries.append({"key": inq.key, "status": inq.status,
                               "priority": inq.priority or "normal",
                               "question": inq.question,
-                              "result_notes": inq.result_notes})
+                              "result_notes": inq.result_notes,
+                              "age_days": age_in_days(inq)})
 
     by_type = {t: sum(1 for m in matched if m["type"] == t) for t in TYPE_ORDER}
 
@@ -240,6 +297,14 @@ def query(repo: ContentRepo, text: str, top: int = 15, *, gap_cap: int = 0) -> d
     # in what order, is GAP_KINDS above.
     found: list[Gap] = []
     repo_arg = shlex.quote(str(repo.root))
+    # Loaded before the gaps rather than after: stale-inquiry reads a threshold
+    # from it. A missing or broken config is not this tool's problem to report
+    # -- the gates own that -- so it degrades to the documented defaults.
+    cfg = {}
+    try:
+        cfg = repo.config()
+    except ContentRepoError:
+        pass
 
     def suggest(kind: str, title: str, why: str, priority: str = "normal") -> dict:
         cmd = f"scripts/capture.py --repo {repo_arg} {kind} {shlex.quote(title)}"
@@ -287,12 +352,123 @@ def query(repo: ContentRepo, text: str, top: int = 15, *, gap_cap: int = 0) -> d
                     "the librarian's job"),
             keys=tuple(uncovered)))
 
+
+    # -- unsummarised-reference: a source is on file that nobody has read -----
+    # Not "no permanent note cites it": summarising a source in your own words
+    # is a literature note's job under 1-1-1, and a claim can rest on a source
+    # nobody has yet summarised.
+    summarised = {str(n.meta.get("reference") or "") for n in by_key.values()
+                  if n.type == "literature"}
+    summarised |= {e.target for n in by_key.values() if n.type == "literature"
+                   for e in graph.out_edges(n, keys, id_to_key)}
+    for row in matched:
+        if row["type"] != "reference" or row["key"] in summarised:
+            continue
+        found.append(Gap(
+            "unsummarised-reference",
+            f"`{row['key']}` is on file but no literature note summarises it: "
+            "the source was captured and never read",
+            suggest("inbox",
+                    f"Write the literature note (own words, with a locator) for "
+                    f"{row['key']}; do not re-fetch the source",
+                    "the source is already captured -- reading, not research"),
+            keys=(row["key"],)))
+
+    # -- weak-sourcing: the same predicate lint_citations warns on ------------
+    # Deliberately only the ADVISORY half. The lint's violation half
+    # (uncited-claim: a sourced claim with no verified reference at all) is a
+    # gate finding and is reported as a warning below, never as a gap: a query
+    # offering a follow-up for a failing gate would look like a way around it.
+    for row in matched:
+        if row["type"] != "permanent":
+            continue
+        linked = [by_key[k] for k in graph.neighbours(by_key[row["key"]], keys, id_to_key)
+                  if by_key[k].type == "reference"
+                  and (by_key[k].meta.get("verification") or {}).get("verified") is True]
+        if not linked:
+            # Gaps have suggestions; warnings do not. A note that makes a
+            # sourced claim with no verified reference is lint_citations'
+            # `uncited-claim` VIOLATION, and a query offering a follow-up for a
+            # failing gate would read as a way around it. The predicate is
+            # imported rather than restated: two regexes deciding what counts
+            # as a sourced claim would eventually disagree, and this report
+            # would announce a gate failure that is not one.
+            if lint_citations.SOURCED_CLAIM.search(by_key[row["key"]].body):
+                warnings.append(
+                    f"{row['path']}: makes a sourced claim but links to no verified "
+                    "reference; that is lint_citations' gate to fail, not a gap this "
+                    "report can close")
+            continue
+        tiers = {str(r.meta.get("source_tier") or "").strip() for r in linked}
+        if tiers & STRONG_TIERS or tiers - {WEAK_TIER}:
+            continue
+        found.append(Gap(
+            "weak-sourcing",
+            f"`{row['key']}` is grounded only in {WEAK_TIER} sources; it has been "
+            "discovered but not verified against a stronger one",
+            suggest("inquiry", f"Find a primary or peer-reviewed source for: {row['title']}",
+                    "a stronger source is one the base does not hold yet"),
+            keys=(row["key"],)))
+
+    # -- orphan-claim: nothing links here ------------------------------------
+    # Inbound, not outbound. lint_links already fails a permanent note with no
+    # OUTBOUND typed link and capture.py refuses to write one, so an outbound
+    # check could only fire on a repo that already fails a gate. Inbound is
+    # invisible to every gate, and is the classic failure: a note written once
+    # and never met again.
+    for row in matched:
+        if row["type"] != "permanent" or inbound.get(row["key"]):
+            continue
+        found.append(Gap(
+            "orphan-claim",
+            f"`{row['key']}` has no inbound link: nothing in the base refers to it, "
+            "so it will not be met again by accident",
+            suggest("inbox",
+                    f"Link {row['key']} into the graph: propose a typed relation to a "
+                    "related claim, or run serendipity_sweep.py",
+                    "linking work over material the base already holds"),
+            keys=(row["key"],)))
+
+    # -- stale-inquiry: a question nobody has worked --------------------------
+    # The one time-dependent gap: it is about now by nature. Filing a fresh
+    # inquiry would duplicate the question, so it files an INBOX entry that
+    # says work it or archive it.
+    stale_days = stale_inquiry_days(cfg)
+    for inq in inquiries:
+        if inq["status"] not in ("new", "in-progress"):
+            continue
+        age = inq.get("age_days")
+        if age is None or age < stale_days:
+            continue
+        found.append(Gap(
+            "stale-inquiry",
+            f"inquiry `{inq['key']}` has been {inq['status']} for {int(age)} days "
+            f"(threshold {int(stale_days)}): it was asked and never worked",
+            suggest("inbox",
+                    f"Work or archive the stale inquiry {inq['key']}: {inq['question']}",
+                    "the question already exists; a second one would duplicate it"),
+            keys=(inq["key"],)))
+
+    # -- raw-mentions: the base HAS the source, it just has no note -----------
+    # Opt-in because raw/ holds whole-book extractions: a base with 200
+    # captures is hundreds of megabytes to read, against notes measured in
+    # kilobytes, and a query must answer in a second from a cold start.
+    if include_raw and missing:
+        hits_by_term = raw_mentions(repo, missing)
+        for term, captures in sorted(hits_by_term.items()):
+            found.append(Gap(
+                "raw-mentions",
+                f"no note uses '{term}', but {len(captures)} capture(s) in raw/ do: "
+                + ", ".join(f"`{c}`" for c in captures[:RAW_NAMED])
+                + ("..." if len(captures) > RAW_NAMED else ""),
+                suggest("inbox",
+                        f"Distil notes on '{term}' from captures already on file: "
+                        + ", ".join(captures[:RAW_NAMED]),
+                        "the source is in raw/ -- distillation, not research"),
+                terms=(term,), keys=tuple(captures[:RAW_NAMED])))
+
     gaps, gap_details, suggestions = rank_gaps(found, cap=gap_cap)
-    cfg = {}
-    try:
-        cfg = repo.config()
-    except ContentRepoError:
-        pass
+
     topics = [str(t) for t in (dig(cfg, "topics") or [])]
     touched_topics = [t for t in topics if q_terms & set(similarity.tokenize(t))]
 
@@ -472,6 +648,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mermaid", action="store_true",
                         help="include a Mermaid diagram of the subgraph in the report "
                              "(the JSON always carries it)")
+    parser.add_argument("--include-raw", action="store_true",
+                        help="also scan raw/*.txt for query terms no note uses; slower, "
+                             "and turns a research gap into a distillation one")
     parser.add_argument("--gaps", type=int, default=0, metavar="N",
                         help="report at most N gaps, highest priority first (0 = all)")
     parser.add_argument("--file-gaps", nargs="?", const=ALL_GAPS, default=None,
@@ -488,7 +667,8 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_USAGE
     repo = open_repo(args.repo)
     try:
-        report = query(repo, args.query, top=max(1, args.top), gap_cap=args.gaps)
+        report = query(repo, args.query, top=max(1, args.top), gap_cap=args.gaps,
+                       include_raw=args.include_raw)
         # `is not None` is what keeps "writes nothing without --file-gaps"
         # literally true: an empty selection string is still a request.
         if args.file_gaps is not None:
