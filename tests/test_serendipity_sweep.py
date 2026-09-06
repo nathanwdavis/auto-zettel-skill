@@ -293,16 +293,18 @@ def test_sweep_survives_a_missing_networkx_end_to_end(two_cluster_repo):
     from conftest import SCRIPTS
 
     # A sitecustomize that makes `import networkx` fail, injected via PYTHONPATH.
+    # `find_spec` is the only finder hook that still exists: Python 3.12 removed
+    # find_module/load_module, so a blocker written against those silently stops
+    # blocking and this test starts asserting the NON-degraded path instead.
     blocker = two_cluster_repo.parent / "blocker"
     blocker.mkdir(exist_ok=True)
     (blocker / "sitecustomize.py").write_text(textwrap.dedent("""
         import sys
         class _Blocker:
-            def find_module(self, name, path=None):
+            def find_spec(self, name, path=None, target=None):
                 if name.split('.')[0] == 'networkx':
-                    return self
-            def load_module(self, name):
-                raise ImportError("No module named 'networkx'")
+                    raise ImportError("No module named 'networkx'")
+                return None
         sys.meta_path.insert(0, _Blocker())
     """), encoding="utf-8")
 
