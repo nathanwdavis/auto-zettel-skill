@@ -15,7 +15,9 @@ by a human at a terminal, by an ad-hoc Claude session, or by the agents.
     capture.py --repo <path> fleeting   "Title" [--body TEXT|-] [--tags a,b]
     capture.py --repo <path> inquiry    "Question" [--body TEXT|-] [--priority high]
     capture.py --repo <path> inbox      "Title" [--body TEXT|-]
-    capture.py --repo <path> reference  ["Title"] [--doi X|--isbn X|--arxiv X|--url X] ...
+    capture.py --repo <path> reference  "Title" [--doi X] [--isbn X] [--arxiv X]
+                                        [--pmid X] [--url X] [--author "Family, Given"]
+                                        [--year N] [--source-tier T] [--offline]
     capture.py --repo <path> literature "Title" --reference KEY --locator "p. 12"
     capture.py --repo <path> permanent  "Claim" --link KEY:relation [--link ...]
     capture.py --repo <path> inquiry-update KEY [--status S] [--result-notes k1,k2]
@@ -24,7 +26,11 @@ The three note kinds were added once the same gap appeared from the other
 direction (A12): the agents were told to write reference, literature, and
 permanent notes from `templates/`, by hand, into a repo whose gates demand
 exact frontmatter -- the machine-authored half of the very problem this tool
-was built for. A generator per note type keeps the invariant without touching
+was built for.
+
+A reference always needs a title. The one exception is a DOI that resolves at
+Crossref, which supplies one; every other identifier is a lookup key, not a
+source of metadata, so `--isbn` alone still needs the title passed. A generator per note type keeps the invariant without touching
 a gate, and refuses at write time what the lints would refuse at gate time: an
 unresolvable link target, a relation outside FR-5, a literature note with no
 locator, a second reference note for a source already on file.

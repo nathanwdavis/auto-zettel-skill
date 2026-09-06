@@ -316,6 +316,16 @@ def stage_file(repo: ContentRepo, source: Path, fields: dict) -> Path:
     """
     if not source.is_file():
         raise ContentRepoError(f"not a file: {source}")
+    # The same filter pending() applies to committed drops. Without it --file
+    # was the one way into raw/ that skipped it: a .bin or .docx would be
+    # copied in, "extracted" as replacement-character noise, and cited as
+    # evidence -- and raw/ is immutable, so the bad capture would stay.
+    if source.suffix.lower() not in SOURCE_EXTS:
+        kind = source.suffix or "(no extension)"
+        raise ContentRepoError(
+            f"{source.name}: unsupported source type {kind}; ingest accepts "
+            f"{', '.join(SOURCE_EXTS)}. Convert it first, or export the text and "
+            "drop that.")
     drop = repo.root / DROP_DIR
     drop.mkdir(exist_ok=True)
     target = drop / source.name
@@ -374,9 +384,19 @@ def main(argv: list[str] | None = None) -> int:
               ("\n".join(files) if files else "ingest_drops: nothing pending"))
         return EXIT_OK
 
-    try:
-        if args.file:
+    # Staging is argument validation -- a path that is not a file, a type this
+    # pipeline cannot read, a name already pending -- so it exits 2 like every
+    # other usage error, not 1 like a failed ingest.
+    staged = None
+    if args.file:
+        try:
             staged = stage_file(repo, args.file, fields)
+        except (ContentRepoError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return EXIT_USAGE
+
+    try:
+        if staged is not None:
             results = ingest(repo, mailto=args.mailto, offline=args.offline,
                              only=[staged], owned_copy=True)
         else:

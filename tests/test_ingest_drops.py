@@ -315,7 +315,9 @@ def test_file_name_collision_in_drop_is_refused(tmp_path, clean_repo):
     external = tmp_path / "same.pdf"
     external.write_bytes(make_pdf("A different source with the same filename"))
     result = run_script("ingest_drops.py", clean_repo, "--file", str(external), "--offline")
-    assert result.returncode == 1 and "already exists" in result.stderr
+    # 2, not 1: staging is argument validation (a bad path, an unreadable type,
+    # a name already pending), and usage errors exit 2 across every entry point.
+    assert result.returncode == 2 and "already exists" in result.stderr
 
 
 def test_sidecar_flags_without_file_are_a_usage_error(clean_repo):
@@ -330,3 +332,58 @@ def test_file_staging_is_logged(tmp_path, clean_repo):
                "--title", "Logged Source", "--offline")
     log = (clean_repo / "log.md").read_text(encoding="utf-8")
     assert "--file" in log and "staged as drop/logged.pdf" in log
+
+
+# --- review findings on PR #17 ------------------------------------------------
+
+def test_file_refuses_an_unsupported_source_type(tmp_path, clean_repo):
+    """--file was the one way into raw/ that skipped pending()'s filter.
+
+    A committed drop of the wrong type is silently ignored; --file copied it in,
+    "extracted" replacement-character noise from it, and wrote a reference note
+    citing it. raw/ is immutable, so that capture would then stay forever.
+    """
+    junk = tmp_path / "spreadsheet.xlsx"
+    junk.write_bytes(b"PK\x03\x04 not a document this pipeline can read")
+    result = run_script("ingest_drops.py", clean_repo, "--file", str(junk), "--offline")
+    assert result.returncode == 2
+    assert "unsupported source type" in result.stderr
+    assert ".pdf" in result.stderr, "the message names what IS accepted"
+    assert not list((clean_repo / "drop").glob("spreadsheet*")), "nothing was staged"
+    assert not list((clean_repo / "raw").glob("*spreadsheet*"))
+
+
+def test_file_accepts_every_type_a_committed_drop_would(tmp_path, clean_repo):
+    """The two routes agree on what a source is."""
+    for i, ext in enumerate(ingest_drops.SOURCE_EXTS):
+        source = tmp_path / f"source{i}{ext}"
+        source.write_bytes(make_pdf(f"A source {i}") if ext == ".pdf"
+                           else f"A source about slip boxes {i}".encode())
+        result = run_script("ingest_drops.py", clean_repo, "--file", str(source),
+                            "--title", f"Accepted Source {i}", "--offline")
+        assert result.returncode == 0, f"{ext}: {result.stderr}"
+
+
+def test_a_scalar_sidecar_tag_is_one_tag_not_five(clean_repo):
+    """`tags: notes` in YAML is the natural way to write one tag."""
+    drop_file(clean_repo, "tagged.pdf", make_pdf("A tagged source"),
+              sidecar={"title": "A Tagged Source", "tags": "notes"})
+    results = ingest_drops.ingest(ContentRepo(clean_repo), offline=True)
+    note = load(clean_repo, f"reference/{results[0]['key']}.md")
+    assert note.tags == ["notes"], "a string must not iterate into characters"
+
+
+def test_a_comma_separated_sidecar_tag_string_splits_like_the_cli(clean_repo):
+    drop_file(clean_repo, "multi.pdf", make_pdf("A multi-tagged source"),
+              sidecar={"title": "A Multi Tagged Source", "tags": "notes, networks"})
+    results = ingest_drops.ingest(ContentRepo(clean_repo), offline=True)
+    note = load(clean_repo, f"reference/{results[0]['key']}.md")
+    assert note.tags == ["notes", "networks"]
+
+
+def test_a_sidecar_tag_list_still_works(clean_repo):
+    drop_file(clean_repo, "listed.pdf", make_pdf("A list-tagged source"),
+              sidecar={"title": "A List Tagged Source", "tags": ["notes", "networks"]})
+    results = ingest_drops.ingest(ContentRepo(clean_repo), offline=True)
+    note = load(clean_repo, f"reference/{results[0]['key']}.md")
+    assert note.tags == ["notes", "networks"]

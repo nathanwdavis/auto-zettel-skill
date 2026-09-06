@@ -381,3 +381,16 @@ def test_reference_capture_is_logged_with_its_identity(repo):
     log = (repo / "log.md").read_text(encoding="utf-8")
     assert "capture: reference ->" in log
     assert "identity=url:example.org/logged" in log and "verified=no" in log
+
+
+def test_reference_usage_documents_every_identifier_it_accepts(repo):
+    """The usage block and the parser must name the same flags."""
+    import capture as mod
+
+    usage = mod.__doc__
+    parser = mod.build_parser()
+    reference = parser._subparsers._group_actions[0].choices["reference"]
+    flags = {opt for action in reference._actions for opt in action.option_strings}
+    for identifier in ("--doi", "--isbn", "--arxiv", "--pmid", "--url"):
+        assert identifier in flags, f"{identifier} is not a real flag"
+        assert identifier in usage, f"{identifier} is accepted but undocumented"

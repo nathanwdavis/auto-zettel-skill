@@ -214,8 +214,9 @@ so existing Routines get it) and, per file:
    cited work's, not the source's own;
 2. writes `reference/<key>.md` with CSL-JSON: from the optional sidecar
    `<stem>.yml` (`title, author, year, doi, isbn, arxiv, pmid, url,
-   source_tier, priority, notes, tags`), else from a DOI or arXiv id found in
-   the text and the PDF's own metadata, enriched from Crossref when the DOI
+   source_tier, priority, notes, tags` — a scalar `tags: notes` is one tag, and
+   a comma-separated string splits the way `--tags` does), else from a DOI or
+   arXiv id found in the text and the PDF's own metadata, enriched from Crossref when the DOI
    resolves; the tier defaults to `peer-reviewed` for a DOI and
    `reputable-secondary` otherwise; `provenance` records the original name;
 3. verifies it on the capture and renders the Chicago strings immediately,
@@ -236,6 +237,10 @@ scripts/ingest_drops.py --repo <repo> --file ~/Downloads/paper.pdf \
 ```
 
 The flags stand in for the sidecar, so nothing needs writing beside the file.
+A source must be one of `.pdf`, `.txt`, `.md`, `.html`, `.htm` — the same set a
+committed drop is filtered to. Anything else is refused as a usage error rather
+than copied in and "extracted" as noise, because `raw/` is immutable and a bad
+capture would stay.
 The file is **copied**, never consumed — it belongs to whoever handed it over
 — and only that file is ingested, so a drop someone committed for the next
 scheduled cycle is not swept into this session's PR. A `--file` that turns out

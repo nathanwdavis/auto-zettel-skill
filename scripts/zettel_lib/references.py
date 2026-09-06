@@ -128,6 +128,21 @@ def authors_from(value) -> list[dict]:
     return out
 
 
+def tags_from(value) -> list[str]:
+    """Sidecar/CLI tags as a list, from a list or a scalar string.
+
+    A scalar is the trap: ``tags: notes`` in a sidecar is the natural way to
+    write one tag, and iterating the string yields ``["n","o","t","e","s"]`` --
+    five one-character tags that then spread silently through the manifest and
+    the tag ontology. Splitting on commas matches ``capture.py --tags``, so the
+    two input routes agree on what a tag list looks like.
+    """
+    if value is None:
+        return []
+    items = value if isinstance(value, (list, tuple)) else str(value).split(",")
+    return [str(item).strip() for item in items if str(item).strip()]
+
+
 def first_line(text: str) -> str:
     """The first line that could plausibly be a title.
 
@@ -203,7 +218,7 @@ def build_reference(note_id: str, fields: dict, extracted_meta: dict, text: str,
     meta = {
         "id": note_id, "key": key, "slug": slug, "aliases": [note_id],
         "type": "reference", "title": title,
-        "tags": [str(t) for t in (fields.get("tags") or [])],
+        "tags": tags_from(fields.get("tags")),
         "source_tier": tier, "scripture": False,
         "csl_json": csl,
         "chicago_note": "", "chicago_bib": "", "citation_renderer": "pandoc",
