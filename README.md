@@ -226,25 +226,34 @@ Three things worth knowing before you use them:
 
 ## Using it yourself
 
-Every script takes `--repo <path-to-your-content-repo>` and answers `--help`.
-The full flag surface for all 21 entry points is in
+Every script that touches a content repo takes `--repo <path-to-that-repo>`, and
+every script answers `--help`. (`fetch_remote.py` is the one exception: it works
+without a clone, so its `--repo` is a GitHub repository *name*.) The full flag
+surface for all 21 entry points is in
 [`references/commands.md`](references/commands.md); this is the task-shaped view.
+
+These examples use the `SCRIPTS` you set during [install](#install). If you would
+rather type bare command names, put that directory on your `PATH` instead:
+
+```sh
+export PATH="$SCRIPTS:$PATH"
+```
 
 ### Get something in
 
 ```sh
 # a thought, a question, feedback for the next run
-capture.py --repo <repo> fleeting "A thought" --tags networks
-capture.py --repo <repo> inquiry  "Does spacing help motor skills?" --priority high
-capture.py --repo <repo> inbox    "Prefer primary sources for the theology cluster"
+"$SCRIPTS/capture.py" --repo <repo> fleeting "A thought" --tags networks
+"$SCRIPTS/capture.py" --repo <repo> inquiry  "Does spacing help motor skills?" --priority high
+"$SCRIPTS/capture.py" --repo <repo> inbox    "Prefer primary sources for the theology cluster"
 
 # a source you have the identifier for
-capture.py --repo <repo> reference --doi 10.1126/science.1199327
-fetch_source.py --repo <repo> --ref <ref-key> --url <open-access-url>
+"$SCRIPTS/capture.py" --repo <repo> reference --doi 10.1126/science.1199327
+"$SCRIPTS/fetch_source.py" --repo <repo> --ref <ref-key> --url <open-access-url>
 
 # a source you have the FILE for -- the drop box
 cp paper.pdf <repo>/drop/            # optional: paper.yml beside it
-ingest_drops.py --repo <repo>
+"$SCRIPTS/ingest_drops.py" --repo <repo>
 ```
 
 **Never hand-write a note file.** The gates demand exact frontmatter, and a
@@ -256,9 +265,9 @@ notes; editing those by hand is fine and expected.
 ### Write the notes
 
 ```sh
-capture.py --repo <repo> literature "<title>" --reference <ref-key> --locator "p. 12" --body -
-capture.py --repo <repo> permanent  "<claim as a sentence>" --link <lit-key>:elaborates --body -
-capture.py --repo <repo> moc        "<subject>" --note <perm-key>
+"$SCRIPTS/capture.py" --repo <repo> literature "<title>" --reference <ref-key> --locator "p. 12" --body -
+"$SCRIPTS/capture.py" --repo <repo> permanent  "<claim as a sentence>" --link <lit-key>:elaborates --body -
+"$SCRIPTS/capture.py" --repo <repo> moc        "<subject>" --note <perm-key>
 ```
 
 Then link the MOC from `INDEX.md` by hand — INDEX links only to MOCs, MOCs link
@@ -270,9 +279,9 @@ locator, a map that lists nothing.
 ### Find out what you have
 
 ```sh
-query.py --repo <repo> "<topic>" [--top 15] [--json] [--mermaid] [--include-raw] [--gaps N]
-query.py --repo <repo> --from-file raw/<id>-<slug>.txt          # passage mode
-query.py --repo <repo> "<topic>" --file-gaps g1,g3              # file a selection
+"$SCRIPTS/query.py" --repo <repo> "<topic>" [--top 15] [--json] [--mermaid] [--include-raw] [--gaps N]
+"$SCRIPTS/query.py" --repo <repo> --from-file raw/<id>-<slug>.txt          # passage mode
+"$SCRIPTS/query.py" --repo <repo> "<topic>" --file-gaps g1,g3              # file a selection
 ```
 
 Read-only unless you pass `--file-gaps`. It ranks every note, shows the typed
@@ -284,9 +293,9 @@ new. Details: [`references/query.md`](references/query.md).
 ### Do a whole piece of work, through the lock and the gates
 
 ```sh
-session_cycle.sh ask    --repo <repo> --question "..."
-session_cycle.sh ingest --repo <repo> --source ~/paper.pdf --title "..."
-session_cycle.sh query  --repo <repo> --from-query "..."
+"$SCRIPTS/session_cycle.sh" ask    --repo <repo> --question "..."
+"$SCRIPTS/session_cycle.sh" ingest --repo <repo> --source ~/paper.pdf --title "..."
+"$SCRIPTS/session_cycle.sh" query  --repo <repo> --from-query "..."
 ```
 
 Each claims the lock, opens a run branch, and prints a checklist naming the
@@ -296,7 +305,7 @@ run. Exit 3 means a scheduled run holds the lock.
 ### Run the gates
 
 ```sh
-remote_cycle.sh gates --repo <repo>
+"$SCRIPTS/remote_cycle.sh" gates --repo <repo>
 ```
 
 Runs all six exactly as CI runs them: `verify_refs` (offline), `build_manifest
@@ -328,7 +337,7 @@ without the first one, and the workflow file alone does not do it:
 | **Cloud Routine** | always | no | a cloud environment + a Routine bound to the content repo |
 
 ```sh
-maintenance_run.sh --repo <repo> --mailto you@example.org [--dry-run]
+"$SCRIPTS/maintenance_run.sh" --repo <repo> --mailto you@example.org [--dry-run]
 ```
 
 is the entry point for the first two. It serializes on a lock, runs the 8-agent
@@ -354,7 +363,8 @@ Without a local clone at all — from claude.ai, or an API session — there is 
 remote-read path that walks `manifest.json` and fetches individual notes:
 
 ```sh
-fetch_remote.py --owner <you> --repo <content-repo> --keys <key1>,<key2>
+# note: --repo here is the GitHub repository NAME, not a path -- there is no clone
+"$SCRIPTS/fetch_remote.py" --owner <you> --repo <repo-name> --keys <key1>,<key2>
 ```
 
 Public repos need no token; private ones read `GITHUB_TOKEN` from the
