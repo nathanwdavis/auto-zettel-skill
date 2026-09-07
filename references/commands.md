@@ -494,9 +494,13 @@ options:
                         inquiry questions per arm [default: config
                         trial_questions, else 3] (default: None)
   --claude-bin CLAUDE_BIN
+                        claude binary to invoke [default: $CLAUDE_BIN, else
+                        'claude'] (default: claude)
   --model MODEL         model for answer+judge calls [default: config
                         models.cheap] (default: None)
   --max-turns MAX_TURNS
+                        turn cap per answer/judge call; bounds trial cost
+                        [default: 15] (default: 15)
   --out OUT             scores JSON path [default: the runs directory]
                         (default: None)
   --seed SEED           randomization seed for the judge's arm order (default:

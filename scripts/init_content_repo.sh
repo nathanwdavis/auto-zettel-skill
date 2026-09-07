@@ -43,7 +43,11 @@ die() { echo "error: $*" >&2; exit 1; }
 next_steps() {
   cat <<STEPS
 
-Next steps -- scheduling maintenance (FR-27):
+Next steps (the tutorial walks all of these: references/tutorial.md):
+
+  0. If you have not already: pip install -r requirements.txt, into the SAME
+     interpreter your scheduler will invoke. A venv-only install fails a cron
+     run several steps in, where it looks like something else.
 
   1. One-time GitHub settings on ${OWNER}/${NAME} (Settings -> Rules / General):
        - make the "gates" status check REQUIRED on main
