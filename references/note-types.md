@@ -141,3 +141,8 @@ Frontmatter: `id`, `key`, `slug`, `aliases`, `type: inquiry`, `question`,
 `lint_links.py` enforces the schema — statuses, resolvability, and the rule that
 `result_notes` entries must be **permanent** notes. Full detail and rationale:
 `references/capture.md`.
+
+---
+
+**Next:** [`capture.md`](capture.md) for the generators that write these, or [`quality-gates.md`](quality-gates.md) for what rejects a malformed one.
+All reference docs: [`README.md`](README.md).

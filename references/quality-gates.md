@@ -99,3 +99,8 @@ Lints emit `FILE\tRULE\tREASON` lines and exit 1 on violations, 2 on usage
 errors, 0 clean; every run appends PASS/FAIL to the content repo's log.md.
 Advisory tools (the serendipity sweep, `verify_refs.py`) always exit 0 so a
 degraded pass is a logged warning, not a blocked cycle.
+
+---
+
+**Next:** [`citation-rules.md`](citation-rules.md) for what the citation gate checks, or [`remote-execution.md`](remote-execution.md) for where the gates bind server-side.
+All reference docs: [`README.md`](README.md).

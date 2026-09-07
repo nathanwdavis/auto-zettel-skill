@@ -318,6 +318,25 @@ def test_a_404_is_a_conclusive_answer():
     assert (result.data, result.conclusive) == (None, True)
 
 
+def test_offline_is_conclusive_about_captures_and_silent_about_registries(clean_repo):
+    """The merge gate runs offline so it can never pass on a lucky live lookup.
+
+    A registry-only reference is therefore honestly unverified at the gate --
+    it must be backed by a capture in the repo. This is NOT the A14 rule, and
+    the distinction is the point: A14 is about a network check that could not
+    be made, this is about evidence the repository does not hold.
+    """
+    note = load(clean_repo, f"reference/{REF_KEY}.md")
+    note.meta["raw_capture"] = ""
+    note.meta["verification"] = {"method": "crossref", "source": "https://doi.org/10.x",
+                                 "verified": True, "date": "2026-08-30T10:00:00Z"}
+    note.save()
+    v = verify_refs.verify_note(
+        load(clean_repo, f"reference/{REF_KEY}.md"), repo_of(clean_repo),
+        offline=True, mailto="", transport=cassette())
+    assert (v.verified, v.method) == (False, "")
+
+
 def test_isbn_verifies_through_search_json(clean_repo):
     note = set_csl(clean_repo)
     transport = cassette(**{"openlibrary.org": OPENLIBRARY_OK})

@@ -212,8 +212,23 @@ def capture_reference(repo: ContentRepo, fields: dict, *, mailto: str = "",
                                      transport=transport)
     references.apply_verification(note, result, when=verify_refs.now())
     note.save()
+
+    # Verified by a registry with nothing in raw/ to show for it: that passes
+    # lint_citations here and FAILS the merge gate, which re-verifies OFFLINE
+    # on purpose so a gate can never pass on a lucky live lookup. Saying so now
+    # is the difference between one more command and a red required check whose
+    # log advises running the tool that caused it.
+    if result.verified and not str(note.meta.get("raw_capture") or "").strip():
+        warnings.append(
+            f"verified via {result.method or 'a registry'}, but nothing is captured in "
+            "raw/ yet. The merge gate re-verifies OFFLINE, so this note will not pass "
+            "it until the source itself is in the repository -- capture it with "
+            "fetch_source.py"
+            + (f" from the open access copy at {result.open_access}"
+               if result.open_access else ""))
     return path, {"key": meta["key"], "identity": identity, "verified": result.verified,
-                  "method": result.method, "warnings": warnings}
+                  "method": result.method, "raw_capture": str(note.meta.get("raw_capture") or ""),
+                  "open_access": result.open_access, "warnings": warnings}
 
 
 def citations_identity(csl: dict) -> str:
@@ -296,6 +311,55 @@ def capture_permanent(repo: ContentRepo, title: str, body: str, links: list[str]
                 "this note reads as a sourced claim but links no VERIFIED reference note; "
                 "lint_citations will fail it (uncited-claim) until one is linked")
     return path, warnings
+
+
+def capture_moc(repo: ContentRepo, title: str, body: str, notes: list[str],
+                tags: list[str]) -> Path:
+    """A map of content, listing at least one note that exists.
+
+    The last note type to get a generator, and the gap was doing real damage:
+    building the first MOC was the one step of a first knowledge pass that still
+    said "copy templates/moc.md and fill it in", directly after every other
+    instruction says never to hand-write a note file. A hand-written MOC fails
+    the manifest for whoever runs next, which is exactly the failure this module
+    exists to prevent.
+
+    It refuses at write time what ``lint_links`` refuses at gate time: a MOC
+    that lists nothing (``moc-empty``) and a note key that resolves to nothing
+    (``unresolved-wikilink``). MOCs reach their notes by body wikilink rather
+    than typed links -- a map is structure, not a claim about a relation -- so
+    the listed notes are rendered as a `## Notes` list, which is the shape
+    templates/moc.md has always described and lint_layering walks.
+    """
+    if not notes:
+        raise ContentRepoError(
+            "a map of content must list at least one note (lint_links: moc-empty): --note KEY")
+    listed = []
+    for ref in notes:
+        note = resolve_note(repo, ref)
+        if note is None:
+            raise ContentRepoError(f"--note {ref!r} resolves to no note in this repo")
+        if note.type == "moc":
+            raise ContentRepoError(
+                f"--note {ref!r} is a map of content; INDEX links to MOCs and MOCs link "
+                "to notes, so a MOC listing a MOC breaks the FR-4 layering")
+        listed.append(note)
+
+    meta = common_meta(title, "moc", allocate_id(repo))
+    meta["tags"] = sorted(set(tags) | {"moc"})
+    meta["links"] = []
+    # Heading, then any lead-in, then the list -- the shape templates/moc.md
+    # describes and lint_layering walks. A body placed above the H1 would make
+    # the document open with a sentence and then announce its own title.
+    lines = [f"# {title}", ""]
+    if body:
+        lines += [body.rstrip(), ""]
+    lines += ["## Notes", ""]
+    lines += [f"- [[{n.key}]] -- {n.title}" for n in listed]
+    text = "\n".join(lines) + "\n"
+    path = repo.root / "moc" / f"{meta['key']}.md"
+    _write(path, meta, text)
+    return path
 
 
 def update_inquiry(repo: ContentRepo, ref: str, *, status: str = "",
@@ -461,6 +525,13 @@ def build_parser() -> argparse.ArgumentParser:
                            help="typed link; repeatable; at least one required (1-1-1)")
     permanent.add_argument("--tags", default="")
 
+    moc = kinds.add_parser("moc", help="a map of content: the notes a reader walks down to")
+    moc.add_argument("title", help="the map's subject")
+    _add_body(moc)
+    moc.add_argument("--note", action="append", default=[], metavar="KEY",
+                     help="a note this map lists; repeatable; at least one required")
+    moc.add_argument("--tags", default="")
+
     update = kinds.add_parser(
         "inquiry-update", help="move an inquiry along its lifecycle (status, result notes)")
     update.add_argument("key", help="inquiry key or bare id")
@@ -521,6 +592,9 @@ def main(argv: list[str] | None = None) -> int:
         elif args.kind == "literature":
             path = capture_literature(repo, title.strip(), read_body(args.body),
                                       args.reference, args.locator, tag_list(args.tags))
+        elif args.kind == "moc":
+            path = capture_moc(repo, title.strip(), read_body(args.body),
+                               args.note, tag_list(args.tags))
         else:
             path, warnings = capture_permanent(repo, title.strip(), read_body(args.body),
                                                args.link, tag_list(args.tags))
@@ -529,7 +603,7 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_USAGE
 
     rel = repo.rel(path)
-    if args.kind in ("fleeting", "inquiry", "reference", "literature", "permanent"):
+    if args.kind in ("fleeting", "inquiry", "reference", "literature", "permanent", "moc"):
         # This capture just changed what manifest.json indexes, and the content
         # repo's required `gates` check rejects a stale manifest -- so a capture
         # committed without a rebuild produces a PR that cannot merge. INBOX is

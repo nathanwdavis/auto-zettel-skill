@@ -95,3 +95,8 @@ failures.
 re-running it over unchanged notes produces a byte-identical file. That makes
 "did this run actually change the knowledge base?" answerable from `git diff`
 alone, which matters for scheduled unattended runs.
+
+---
+
+**Next:** [`note-types.md`](note-types.md) for the rules each note obeys, or [`quality-gates.md`](quality-gates.md) for what enforces them.
+All reference docs: [`README.md`](README.md).

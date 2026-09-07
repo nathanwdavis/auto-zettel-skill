@@ -79,3 +79,8 @@ what `ci/setup-environment.sh` arranges.
    model finishes; push only on pass, with up to three re-pull/re-gate
    retries on rejection (the sandbox check is pre-push only).
 5. Audit: every step stamped in the content repo's `log.md`.
+
+---
+
+**Next:** [`remote-execution.md`](remote-execution.md) for the no-laptop path, or [`orchestra.md`](orchestra.md) for what a run actually dispatches.
+All reference docs: [`README.md`](README.md).

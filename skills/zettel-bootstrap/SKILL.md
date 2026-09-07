@@ -146,7 +146,9 @@ touch the topic, adds the notes one link away, emits the typed edges between
 everything it named, and ranks the gaps: terms the base never uses, claims
 resting only on weak sources, questions asked and never worked, matches with
 no distilled claim, sources nobody read, claims nothing links to, notes no MOC
-reaches. `--mermaid` adds a diagram of that subgraph to the same report.
+reaches, and -- with `--include-raw` -- terms only a `raw/` capture uses.
+`--mermaid` adds a diagram of that subgraph to the same report; `--gaps N`
+keeps only the N most important, which is how you bound a plan to a budget.
 
 Answer in chat from that report, citing note keys so the user can open them.
 Read the top notes if the report alone cannot settle the question. **Do not

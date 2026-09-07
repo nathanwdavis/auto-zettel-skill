@@ -191,11 +191,13 @@ def main(argv: list[str] | None = None) -> int:
                         help="inquiry questions per arm "
                              "[default: config trial_questions, else 3]")
     parser.add_argument("--claude-bin",
-                        default=os.environ.get("CLAUDE_BIN", "claude"))
+                        default=os.environ.get("CLAUDE_BIN", "claude"),
+                        help="claude binary to invoke [default: $CLAUDE_BIN, else 'claude']")
     parser.add_argument("--model", default=None,
                         help="model for answer+judge calls "
                              "[default: config models.cheap]")
-    parser.add_argument("--max-turns", type=int, default=15)
+    parser.add_argument("--max-turns", type=int, default=15,
+                        help="turn cap per answer/judge call; bounds trial cost [default: 15]")
     parser.add_argument("--out", type=Path, default=None,
                         help="scores JSON path [default: the runs directory]")
     parser.add_argument("--workdir", default=None, help=argparse.SUPPRESS)

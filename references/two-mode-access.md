@@ -58,3 +58,8 @@ Mode B reads and reasons; it does not run the lints or push. Writes from a
 Mode-B session go through the INBOX pattern: propose the change as an inbox
 entry (via the GitHub MCP write tools when available), and the next Mode-A
 maintenance run applies it under the full gates.
+
+---
+
+**Next:** [`query.md`](query.md) for what a query degrades to without a clone, or [`architecture.md`](architecture.md) for the repo layout it walks.
+All reference docs: [`README.md`](README.md).

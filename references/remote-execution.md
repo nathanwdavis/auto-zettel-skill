@@ -145,9 +145,15 @@ git -C /opt/zettel-skill ls-remote origin main
 
 ## Content-repo CI
 
-Copy `ci/content-repo-gates.yml` into the content repo as
-`.github/workflows/gates.yml`, then apply the repo settings that make it
-mean something. All three are one-time manual steps on the content repo:
+**Genesis installs the workflow for you**: `init_content_repo.sh` copies
+`ci/content-repo-gates.yml` into the new repo as `.github/workflows/gates.yml`
+(amendment A9). A copy that had to be made by hand went stale on the first live
+repo, which is why it ships at scaffold time. For a content repo created before
+that, copy it once — and check it against this repo's copy if the gates look
+like they are missing steps.
+
+The workflow existing is not the guarantee. Three one-time settings on the
+content repo are what make it mean something, and all three are manual:
 
 1. **Make `gates` a required status check on `main`** (Settings → Branches →
    branch protection rule, or a ruleset). Without it the workflow still runs,
@@ -212,3 +218,8 @@ Only a provably stale lock (past `STALE_LOCK_HOURS`) is ever broken.
 Session work hands off through `remote_cycle.sh finish` like any cycle: a run
 branch, a PR, and the required check. There is no session path to `main`.
 See `references/capture.md`.
+
+---
+
+**Next:** [`scheduling.md`](scheduling.md) for the laptop paths, or [`two-mode-access.md`](two-mode-access.md) for reading without a clone.
+All reference docs: [`README.md`](README.md).
