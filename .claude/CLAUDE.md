@@ -18,7 +18,7 @@ variables. `.gitignore` covers `.env`, `*.token`, `*.pem`, `.netrc`, `run.lock`.
 ## Running things
 
 ```sh
-.venv/bin/python -m pytest -q      # 537 tests, ~210s
+.venv/bin/python -m pytest -q      # 630 tests, ~5 min
 ./smoke_test.sh                    # pytest + end-to-end scaffold; exit 0 or it isn't done
 claude plugin validate --strict .
 ```

@@ -14,7 +14,7 @@ The plugin is laid out at the repo root (only `plugin.json` lives inside `.claud
 ```
 .claude-plugin/plugin.json          # name (required), version, description, author, repository (string URL)
 .claude-plugin/marketplace.json     # makes `/plugin marketplace add` work (FR-17)
-skills/zettel-bootstrap/SKILL.md    # six portable frontmatter fields only; body <500 lines (currently 356)
+skills/zettel-bootstrap/SKILL.md    # six portable frontmatter fields only; body <500 lines (currently 430)
 agents/                             # 8 subagent definitions (.md + YAML frontmatter)
   orchestrator.md researcher.md synthesizer.md critic.md
   librarian.md connector.md note-maintainer.md skill-smith.md
@@ -520,9 +520,61 @@ match dirs, root < 500 lines, setup links every skill); passage mode, edges,
 Mermaid determinism, gap ids and selection in `test_query.py`. Smoke gains
 steps for each before the destructive `[4]` block.
 
+### Post-Phase-4 round 9 — documentation for people who did not build it  ✅ shipped
+
+*Exit gate: a reader who has installed nothing can reach a grounded note.*
+
+The code was finished and the documentation was not. The README had grown by
+accretion into 411 lines whose largest section was ordered by when each feature
+was built; there was no quickstart, no sample of any artifact the system
+produces, no configuration reference, no troubleshooting, and no cost signal
+anywhere in the tree. Three defects were structural rather than cosmetic:
+
+1. **The first documented install route made every documented command
+   unrunnable.** `/plugin install` was recommended, then every command was
+   written as a bare relative path, with no mention of `$CLAUDE_PLUGIN_ROOT` or
+   where a plugin lands. The sub-skills had always resolved this correctly.
+2. **The second route installed a quarter of the product** — one of four
+   skills, none of the eight agents — and promised the bare slash commands
+   twelve lines later.
+3. **The model was better documented than the user.** The router SKILL.md
+   linked all twelve reference docs; the README linked eight, and the four it
+   could not reach included `note-types.md` and `quality-gates.md`.
+
+Shipped: a README ordered by the user journey and leading with the
+conversational and slash-command routes; `references/tutorial.md`, run end to
+end before it was written; `references/commands.md`, generated from each
+script's own `--help` so it cannot drift; `references/README.md` as an index,
+with a "Next" footer on every doc; and `capture.py moc`, because the first
+knowledge pass required hand-writing the one note type that had no generator,
+directly after five documents said never to.
+
+What round 9 taught:
+
+- **A documentation round finds product bugs, because writing an instruction
+  means running it.** Three came out of it: the MOC generator gap; the two
+  install routes; and the one below, which no test would have found.
+- **The path a user is told to take was the one nobody had walked.**
+  `capture.py reference --doi <doi>` produces a note that Crossref verifies and
+  `lint_citations` passes — and that the content repo's REQUIRED check then
+  fails, because the merge gate re-verifies OFFLINE on purpose so no gate can
+  pass on a lucky live lookup. The design is right; the silence was the defect.
+  The CI log even advised running `verify_refs.py`, the tool that had just
+  un-verified the note. `capture.py` now says so at the moment it writes one,
+  naming the open-access URL to capture from.
+- **Do not "fix" a design you have only half read.** The first response to that
+  finding was to make the offline path preserve a prior verification, the way
+  A14 does for an inconclusive network check. Two existing tests refused it,
+  and they were right: A14 is about a check that could not be made, this is
+  about evidence the repository does not hold. The tests encoded intent, not a
+  bug — the opposite of the Open Library cassette in round 8.
+- **Generate reference documentation from the thing it documents.**
+  `commands.md` is built from `--help` output, so the class of drift that put
+  "537 tests" in four files cannot happen to it.
+
 ### Handoff — next steps (operational, not code)
 
-The plugin code is done and green (537 tests, smoke exit 0, strict validate).
+The plugin code is done and green (630 tests, smoke exit 0, strict validate).
 What remains happens in the *environment* and the *content repo*, not here.
 
 **Done** (2026-09-01): the content repo's GitHub settings are now set —
@@ -588,7 +640,7 @@ agent holds the lock and is already mid-merge.
 
 ## 3. Testing & definition of done
 
-The §12 checklist is the definition of done, run before final commit of each phase and in full before v1. `smoke_test.sh` orchestrates every item that works without network or `gh`; the pytest suite currently stands at **537 tests**.
+The §12 checklist is the definition of done, run before final commit of each phase and in full before v1. `smoke_test.sh` orchestrates every item that works without network or `gh`; the pytest suite currently stands at **630 tests**.
 
 Fixtures are **built programmatically** in `tests/conftest.py`, not checked in as static files, so every violation fixture is provably "the clean repo with exactly one thing broken" and the reference note's Chicago strings stay self-consistent with its CSL-JSON.
 
