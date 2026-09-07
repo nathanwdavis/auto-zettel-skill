@@ -208,7 +208,7 @@ def verify_note(
         traceable.
         """
         return Verification(True, str(prior.get("method") or "raw-capture"),
-                            str(prior.get("source") or capture),
+                            str(prior.get("source") or capture or ""),
                             str(prior.get("identifier_check") or ""))
 
     capture_ok = False
@@ -235,6 +235,12 @@ def verify_note(
         return Verification(True, "raw-capture", capture, "failed")
 
     if offline:
+        # Deliberately NOT the keep_prior() rule that governs an inconclusive
+        # network check (A14). The merge gate runs offline precisely so it can
+        # never pass on a lucky live lookup: to reach `main`, a reference must
+        # be backed by evidence inside the repository, not by a registry that
+        # answered once. A registry-only note is honestly unverified here, and
+        # `capture.py reference` now says so at the point it writes one.
         return Verification(False, "", "")
 
     # No capture yet: besides verifying the identifier, find where a legal

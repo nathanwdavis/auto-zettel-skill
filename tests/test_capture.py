@@ -282,6 +282,34 @@ def test_reference_needs_a_title_or_a_resolving_identifier(repo):
     assert result.returncode == 2 and "needs a title" in result.stderr
 
 
+def test_reference_verified_by_a_registry_warns_that_the_gate_runs_offline(repo):
+    """A registry-verified note with no capture passes lint_citations here and
+    FAILS the merge gate, which re-verifies offline on purpose. Silence there
+    bought a red required check whose log advised running the tool that caused
+    it."""
+    transport = http.CassetteTransport({"api.crossref.org": CROSSREF_OK})
+    _, payload = capture_mod.capture_reference(
+        ContentRepo(repo), {"doi": DOI}, mailto="me@example.org", transport=transport)
+    assert payload["verified"] is True and payload["raw_capture"] == ""
+    assert any("re-verifies OFFLINE" in w and "fetch_source.py" in w
+               for w in payload["warnings"]), payload["warnings"]
+
+
+def test_reference_with_a_capture_does_not_warn_about_the_offline_gate(repo):
+    """The other half: nothing to say when the evidence is already in the repo.
+    The fixture's own reference note has a raw capture."""
+    transport = http.CassetteTransport({"api.crossref.org": CROSSREF_OK})
+    _, payload = capture_mod.capture_reference(
+        ContentRepo(repo), {"doi": DOI, "title": "With a capture"},
+        mailto="me@example.org", transport=transport)
+    note = Note.load(repo / "reference" / f"{payload['key']}.md")
+    note.meta["raw_capture"] = "raw/x.txt"
+    note.save()
+    (repo / "raw" / "x.txt").write_text("source text", encoding="utf-8")
+    assert run_script("verify_refs.py", repo, "--offline").returncode == 0
+    assert run_script("lint_citations.py", repo).returncode == 0
+
+
 def test_reference_passes_every_gate_once_its_source_is_captured(repo):
     """The honest path to green: capture the source, then verify."""
     result = capture(repo, "reference", "A Captured Source", "--author", "Tester, Ada",

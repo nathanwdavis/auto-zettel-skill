@@ -212,8 +212,23 @@ def capture_reference(repo: ContentRepo, fields: dict, *, mailto: str = "",
                                      transport=transport)
     references.apply_verification(note, result, when=verify_refs.now())
     note.save()
+
+    # Verified by a registry with nothing in raw/ to show for it: that passes
+    # lint_citations here and FAILS the merge gate, which re-verifies OFFLINE
+    # on purpose so a gate can never pass on a lucky live lookup. Saying so now
+    # is the difference between one more command and a red required check whose
+    # log advises running the tool that caused it.
+    if result.verified and not str(note.meta.get("raw_capture") or "").strip():
+        warnings.append(
+            f"verified via {result.method or 'a registry'}, but nothing is captured in "
+            "raw/ yet. The merge gate re-verifies OFFLINE, so this note will not pass "
+            "it until the source itself is in the repository -- capture it with "
+            "fetch_source.py"
+            + (f" from the open access copy at {result.open_access}"
+               if result.open_access else ""))
     return path, {"key": meta["key"], "identity": identity, "verified": result.verified,
-                  "method": result.method, "warnings": warnings}
+                  "method": result.method, "raw_capture": str(note.meta.get("raw_capture") or ""),
+                  "open_access": result.open_access, "warnings": warnings}
 
 
 def citations_identity(csl: dict) -> str:
