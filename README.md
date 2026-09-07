@@ -1,23 +1,84 @@
 # zettel-bootstrap
 
-A Claude Code plugin that scaffolds and perpetually grows a **citation-grounded
-Zettelkasten** knowledge repository on GitHub. Every sourced claim traces to a
-verified reference; notes that cannot be grounded fail a lint and never land.
+A Claude Code plugin that scaffolds and then perpetually grows a
+**citation-grounded Zettelkasten** on GitHub. You give it a topic; it researches,
+writes atomic notes, and links them — and every sourced claim traces to a
+reference it verified. Notes that cannot be grounded fail a lint and never land.
 
-> **Status: all 4 phases shipped** — substrate, citation gates, the agent
-> orchestra, scheduled maintenance (laptop cron *and* fully remote via
-> Routines + CI gating), two-mode access, the serendipity sweep, human capture
-> with tracked inquiries and ad-hoc research, and skill emergence: the base
-> proposes its own child skills, A/B-trials them on its own questions, and a
-> human decides. See [`PLAN.md`](PLAN.md).
+It is built to keep working while you are not watching: a scheduled run opens a
+pull request, a required status check re-runs every gate, and only green work
+reaches `main`.
+
+**What it needs before you start:** a GitHub account and the `gh` CLI, Python
+3.11+, and — if you want it to grow on a schedule — a willingness to spend money
+on model calls. A minimal weekly cycle runs roughly **$1.50–2.50** on the strong
+tier; the cheap tier is the default for scheduled runs and costs less. Nothing
+here is free to run unattended.
+
+**What it is not:** a note-taking app. There is no UI. Your notes are plain
+markdown in a git repository you own, readable in Obsidian or any editor, and
+this plugin is the thing that fills and maintains them.
+
+---
+
+## What it produces
+
+One permanent note, exactly as `capture.py` writes it — an atomic claim, typed
+links to the source it rests on, and an immutable id:
+
+```markdown
+---
+id: '202609070308'
+key: learners-confidence-ranks-study-methods-in-the-wrong-order--202609070308
+type: permanent
+title: Learners' confidence ranks study methods in the wrong order
+links:
+- target_id: karpicke-and-blunt-on-retrieval-versus-concept-mapping--202609070307
+  relation: elaborates
+- target_id: karpicke-and-blunt-retrieval-practice-produces-more-learning--202609070306
+  relation: source
+created: '2026-09-07'
+---
+Students who built concept maps judged they had learned more than students who
+practised retrieval, while testing showed the reverse. A learner's sense of how
+well a method is working is therefore not usable as a signal for choosing
+between methods.
+```
+
+And this is what asking it what it knows looks like — grouped by type, with the
+gaps named and numbered so you can act on one:
+
+```
+# What the base knows about: "retrieval practice"
+
+Matched 4 of 4 notes (permanent 1, literature 1, reference 1, moc 1).
+
+## Claims the base makes (permanent notes)
+- **Learners' confidence ranks study methods in the wrong order** -- `learners-confidence...--202609070308`
+  sources: karpicke-and-blunt-retrieval-practice-produces-more-learning--202609070306
+
+## Sources on file (reference notes)
+- **Karpicke and Blunt, Retrieval Practice Produces More Learning** -- `karpicke-and-blunt...--202609070306`
+  peer-reviewed · verified via raw-capture · cited by 2 note(s)
+
+## Gaps
+- g1: 2 matched note(s) sit in no map of content, so a reader walking down from
+  INDEX cannot find them: ...
+
+To file all 1 at once, re-run this query with --file-gaps; to file a selection,
+name the gap ids: --file-gaps g1,g3.
+```
 
 ## Two repositories
 
 This is the **skill repo** — it contains only the plugin, never notes. Your
 notes live in a separate **content repo**, scaffolded by `init_content_repo.sh`
-at genesis. They never mix. Both repos are public: the skill has no secrets in
-it (auth always comes from `gh`, the SSH agent, or environment variables), and
-a public skill repo is what lets cloud environments install it with no token.
+at genesis. They never mix.
+
+The skill repo is public and contains no secrets — auth always comes from `gh`,
+the SSH agent, or environment variables — which is what lets a cloud environment
+install it with no token. **Your content repo can be public or private; you
+choose at genesis.**
 
 ## Install
 
@@ -98,280 +159,270 @@ because it pulls torch (~1–2 GB), and the sweep works without it. See
 [`references/citation-rules.md`](references/citation-rules.md) for why pandoc
 rather than citeproc-py renders the Chicago strings.
 
-## Use
+## Quickstart
 
-Ask Claude to start a knowledge base and the skill triggers on its own. To
-drive the scripts directly:
-
-### Genesis — create the content repo
+From nothing to a grounded note. Assumes you have installed the plugin above and
+run `gh auth login`.
 
 ```sh
-scripts/init_content_repo.sh \
-  --name my-knowledge-base \
-  --visibility private \
-  --owner <your-github-username> \
-  --topics "topic one, topic two" \
-  --cadence weekly \
-  --budget 5
+# 1. Create the content repo. It asks for nothing it can infer, and refuses to
+#    clobber an existing repo or a non-empty directory.
+"$SCRIPTS/../scripts/init_content_repo.sh" --name my-kb --visibility private \
+  --owner <your-github-username> --topics "retrieval practice, spaced repetition"
+
+# 2. Give it a source you already have. Anything in drop/ is ingested as
+#    immutable evidence, with a reference note written for it.
+cp ~/notes-on-a-paper.txt my-kb/drop/
+"$SCRIPTS/ingest_drops.py" --repo my-kb --offline
+
+# 3. Ask what it now knows.
+"$SCRIPTS/query.py" --repo my-kb "retrieval practice"
 ```
 
-Add `--no-remote` to scaffold and commit locally without touching GitHub. The
-script refuses to clobber an existing repo or a non-empty directory.
+That is a real, gate-clean repository with one verified source in it. The
+[full tutorial](references/tutorial.md) takes it from there — the first
+literature and permanent notes, a map of content, the gates, and putting it on a
+schedule.
 
-### Capture — getting a thought, question, or note into the repo
+Or skip all of it and just ask Claude, below.
 
-```sh
-scripts/capture.py --repo <content-repo> fleeting "A thought" --tags networks
-scripts/capture.py --repo <content-repo> inquiry  "A question" --priority high
-scripts/capture.py --repo <content-repo> inbox    "Feedback for the next run"
-pbpaste | scripts/capture.py --repo <content-repo> fleeting "Clipped" --body -
-```
+## Using it through Claude
 
-The knowledge notes have generators too, for the same reason — the agents were
-otherwise writing reference, literature, and permanent notes from `templates/`
-by hand:
+This is the way the plugin is meant to be used. The skill triggers on its own
+when you describe what you want:
 
-```sh
-scripts/capture.py --repo <content-repo> reference --doi 10.48550/arXiv.2608.27454
-scripts/capture.py --repo <content-repo> literature "Tang on skill evolution" \
-  --reference wikiskill--202608301000 --locator "§3.1"
-scripts/capture.py --repo <content-repo> permanent "Skills compound like notes" \
-  --link wikiskill--202608301000:source
-scripts/capture.py --repo <content-repo> inquiry-update <key> --status answered \
-  --result-notes skills-compound-like-notes--202609010900
-```
+> *"Start a knowledge base on spaced repetition and retrieval practice."*
+> *"What do we already know about interleaving?"*
+> *"Read this paper and add it to my zettelkasten."* (with a PDF attached)
+> *"Look up whether spacing effects hold for motor skills, and file what you find."*
 
-Each refuses at write time what the lints refuse at gate time: a second
-reference note for a source already on file, a relation outside the FR-5
-taxonomy, an unresolvable link target, a literature note with no locator, an
-inquiry marked `answered` with nothing to point at. `reference` enriches from
-Crossref, renders the Chicago strings, and verifies through the same
-`verify_refs.py` the gate uses — so a note with a resolvable identifier is
-gate-clean the moment it exists, and one without says so plainly instead of
-looking green.
-
-Never hand-write a note file. The gates demand exact frontmatter, and a
-malformed file in `fleeting/` fails the manifest build for the *next scheduled
-run* — the person who dropped it never sees the breakage. `capture.py`
-generates artifacts that already pass every gate, and allocates note IDs around
-the ones already taken so two captures in the same minute cannot collide.
-
-An **inquiry** is an open question tracked across runs
-(`new → in-progress → answered → archived`). Runs work the `new` ones first;
-`scripts/inquiries.py --repo <content-repo> [--status new] [--json]` lists them.
-`lint_links.py` refuses to let an inquiry be marked `answered` without a
-`result_notes` backlink to the permanent note that answered it.
-
-### Drop a source you obtained yourself
-
-```sh
-cp ~/Downloads/paper.pdf <content-repo>/drop/      # optional: paper.yml beside it
-git -C <content-repo> add drop && git -C <content-repo> commit -m "drop: paper"
-scripts/ingest_drops.py --repo <content-repo>       # or wait for the next cycle
-
-# or, for a source a session was just handed, in one command:
-scripts/ingest_drops.py --repo <content-repo> --file ~/Downloads/paper.pdf \
-  --title "..." --author "Ahrens, Sönke" --year 2017
-```
-
-Paywalled papers, PDFs an author sent, pages no fetcher renders: put the
-file in `drop/` (GitHub's "Upload files" works too; it opens a PR). Every
-cycle ingests what is there before planning — the file moves to `raw/` as
-immutable evidence with a text extraction beside it, a reference note is
-written from the optional sidecar or a DOI found in the text (enriched from
-Crossref), verified on the capture, and an INBOX entry asks the run to write
-the notes. Duplicates and oversize files are marked in place and reported.
-
-The extraction covers **every** page, each marked `--- page N ---`, so a
-literature note can cite `p. N` without reopening the PDF; identity detection
-still reads only the first five pages, because a DOI deep in a paper is
-almost always a cited work's. `--file` copies an external source in and
-ingests only that file, leaving the caller's copy alone and leaving drops
-committed for the next scheduled cycle untouched.
-Details: [`references/capture.md`](references/capture.md).
-
-For sources the agents fetch themselves, `scripts/fetch_source.py` names and
-writes the capture, `verify_refs.py` records a legal open-access copy for any
-DOI (Unpaywall/OpenAlex), and an opt-in `fetch.renderer` (Jina or Firecrawl)
-handles JavaScript-only pages. See
-[`references/citation-rules.md`](references/citation-rules.md).
-
-### Query — what does the base already know?
-
-```sh
-scripts/query.py --repo <content-repo> "atomic notes" [--top 15] [--json] [--mermaid]
-scripts/query.py --repo <content-repo> --from-file raw/<id>-<slug>.txt   # passage mode
-```
-
-Ranks every note against the query, groups the matches by type (claims,
-literature, sources with their verification state, maps), lists open
-inquiries that touch the topic and the notes one link away, emits the typed
-edges between everything it named — plus `mentions` for body wikilinks, and a
-Mermaid diagram of the subgraph under `--mermaid` — and **ranks** the gaps:
-terms the base never uses, claims resting only on weak sources, questions asked
-and never worked, matches with no distilled claim, sources captured and never
-read, claims nothing links to, notes no MOC reaches, and (under
-`--include-raw`) terms only a `raw/` capture uses.
-
-It reads only — no research, no notes, no log line — and ends with one
-suggested follow-up per gap as a ready-to-run `capture.py` command. Each gap
-carries an id, so `--file-gaps g1,g3` captures a selection where bare
-`--file-gaps` still captures all of them.
-
-**Passage mode** (`--from-file`) reads a capture's text extraction back page by
-page and sorts every passage into three piles: already stated, related, and
-nothing close. The third pile comes with a `capture.py literature` command per
-passage, locator already filled in — so ingesting a source becomes "here are
-the eleven passages nobody has written down" rather than "here are ninety
-pages". Read-only, and it refuses `--file-gaps`: a literature note needs prose
-you write. Details: [`references/query.md`](references/query.md).
-
-### Session flows — answer, ingest, or close gaps now
-
-```sh
-scripts/session_cycle.sh ask    --repo <content-repo> --question "..."
-scripts/session_cycle.sh ingest --repo <content-repo> --source ~/paper.pdf --title "..."
-scripts/session_cycle.sh query  --repo <content-repo> --from-query "..."
-```
-
-Three kinds of work, one handling: each claims the same lock a scheduled cycle
-claims, opens the same `zettel/run-*` branch, and hands off through the same PR
-and required check. Then each prints a checklist naming the concrete commands
-for the rest of the job — with this repo's real paths substituted in, the way
-the maintenance prompts are rendered.
-
-`ask` files the question before researching, so an interrupted session leaves
-it behind. `ingest` copies a source in (never consuming the caller's file),
-captures it, writes its reference note, and hands over page-marked text; a
-source already on file exits 1 naming it. `query` opens the branch *before*
-filing its gaps, so the captures land in that cycle's PR rather than in a
-working tree the next run overwrites.
-
-Exit 3 from any of them means a scheduled run holds the lock — stand down, do
-not force it. `adhoc_research.sh` is `session_cycle.sh ask` under its original
-name. Details: [`references/capture.md`](references/capture.md).
+Claude will ask for anything it cannot infer — it never guesses your repo name,
+owner, or visibility — and then drives the same scripts documented below.
 
 ### Slash commands
 
-Each flow is a sub-skill, so it is invocable directly:
+Four skills ship, so each flow is directly invocable. Through the plugin they
+are namespaced (`/zettel-bootstrap:zettel-query`); through the symlink route
+they are bare.
 
-| Command | Does |
-|---|---|
-| `/zettel-ingest <file>` | add a source the user handed the session, then write its notes |
-| `/zettel-query <topic>` | map what the base already knows, and name the gaps |
-| `/zettel-ask <question>` | research it now, through the lock and the gates |
+| Command | Takes | Does | Writes? |
+|---|---|---|---|
+| `/zettel-bootstrap` | — | the router: genesis, gates, maintenance, anything not below | depends |
+| `/zettel-query <topic>` | a topic or question | maps what the base already knows and names the gaps | **nothing**, not even a log line |
+| `/zettel-ask <question>` | a question | researches it now, captures and verifies sources, files the notes | claims a lock, opens a branch and a PR |
+| `/zettel-ingest <file>` | a path to a PDF/md/txt | adds a source you hand it, then writes its notes | claims a lock, opens a branch and a PR |
 
-Through the plugin they are namespaced (`/zettel-bootstrap:zettel-query`);
-through the `~/.claude/skills` symlink route they are bare. `ci/setup-environment.sh`
-links every skill, so cloud sessions get all four.
+Three things worth knowing before you use them:
 
-### Maintenance — scheduled, unattended growth
+- **`/zettel-query` first.** It is free and read-only, and it will often show
+  you the base already answers the question — which is the cheapest possible
+  outcome. `/zettel-ask` starts by running it for exactly this reason.
+- **`/zettel-ask` and `/zettel-ingest` are write operations.** They claim the
+  same lock a scheduled run uses, work on a `zettel/run-*` branch, and hand off
+  through a pull request. There is deliberately no fast path to `main`, because
+  a fast path to `main` is a path around the citation gates.
+- **Exit 3 means stand down.** A scheduled run holds the lock. That is a
+  success, not an error — do not force it.
 
-```sh
-scripts/maintenance_run.sh --repo <content-repo> --mailto you@example.org
-```
+## Using it yourself
 
-One entrypoint for cron, launchd/systemd, or a desktop/Cowork scheduled task.
-It serializes on `run.lock`, pulls, runs a headless `claude -p` session that
-dispatches the 8-agent orchestra in isolated worktrees, then **re-runs the lint
-gates itself and pushes only if they pass** — the model commits, the wrapper
-pushes, so a runaway or budget-cut run can never push unlinted state. Budget
-and turn caps come from the content repo's `config.yml`. `--dry-run` does
-everything except the push. A working crontab line and the desktop/cloud
-caveats are in [`references/scheduling.md`](references/scheduling.md).
+Every script takes `--repo <path-to-your-content-repo>` and answers `--help`.
+The full flag surface for all 21 entry points is in
+[`references/commands.md`](references/commands.md); this is the task-shaped view.
 
-### Serendipity — surfacing unplanned connections
-
-```sh
-scripts/serendipity_sweep.py --repo <content-repo>
-```
-
-Builds the link graph, detects communities with Louvain, and writes
-cross-community candidate links into `proposed-links/`. Scoring uses the
-standard library by default; set `embedding.enabled: true` in the content
-repo's `config.yml` and install `requirements-optional.txt` to use
-sentence-transformers instead (it degrades back to lexical, with a logged
-warning, if the model is unavailable).
-
-The sweep never edits notes and always exits 0 — a candidate is a reason to
-look, not a link. The connector agent reads both notes and justifies or
-discards each one; the critic writes accepted links into both notes. Details:
-[`references/serendipity.md`](references/serendipity.md).
-
-### Skill emergence — the base grows its own procedures
-
-On `skill_smith_cadence` (monthly by default) a maintenance cycle's
-skill-smith may propose **one** child skill into the content repo's
-`skills/<name>/` — never into this repo; that rail is enforced in code, not
-prose. An A/B trial then answers the repo's own open inquiries with and
-without the candidate (read-only, cheap-tier) and records the scores in
-`skill-impact.md`. Promotion is always yours:
+### Get something in
 
 ```sh
-scripts/skill_review.py --repo <content-repo> list
-scripts/skill_review.py --repo <content-repo> promote --skill <name> --reason "..."
-scripts/skill_review.py --repo <content-repo> reject  --skill <name> --reason "..."
+# a thought, a question, feedback for the next run
+capture.py --repo <repo> fleeting "A thought" --tags networks
+capture.py --repo <repo> inquiry  "Does spacing help motor skills?" --priority high
+capture.py --repo <repo> inbox    "Prefer primary sources for the theology cluster"
+
+# a source you have the identifier for
+capture.py --repo <repo> reference --doi 10.1126/science.1199327
+fetch_source.py --repo <repo> --ref <ref-key> --url <open-access-url>
+
+# a source you have the FILE for -- the drop box
+cp paper.pdf <repo>/drop/            # optional: paper.yml beside it
+ingest_drops.py --repo <repo>
 ```
 
-Rejection reverts only the skill layer — knowledge notes are never touched —
-and is permanent history: a rejected create is never proposed again. Approved
-skills are read by later runs as house procedure. The full design, including
-what `lint_skills.py` and `check_skill_sandbox.py` enforce and where:
-[`references/skill-emergence.md`](references/skill-emergence.md).
+**Never hand-write a note file.** The gates demand exact frontmatter, and a
+malformed file in `fleeting/` fails the manifest build for the *next* scheduled
+run — so the person who wrote it never sees the breakage. The generators produce
+artifacts that already pass every gate. `INBOX.md` and `INDEX.md` are prose, not
+notes; editing those by hand is fine and expected.
 
-### Fully remote scheduled runs (no laptop)
+### Write the notes
 
-A Routine fires a fresh remote session on a cloud environment whose setup
-script (`ci/setup-environment.sh`) has already installed this skill. The
-session claims a **git-branch lock** (`scripts/zettel_lib/gitlock.py` — a
-container-local lock file can't serialize two ephemeral containers), works on a
-`zettel/run-*` branch via `scripts/remote_cycle.sh`, and hands a PR to CI.
-`ci/content-repo-gates.yml`, installed in the content repo with `gates` as a
-**required status check**, decides what reaches `main` — enforcement no session
-can bypass.
+```sh
+capture.py --repo <repo> literature "<title>" --reference <ref-key> --locator "p. 12" --body -
+capture.py --repo <repo> permanent  "<claim as a sentence>" --link <lit-key>:elaborates --body -
+capture.py --repo <repo> moc        "<subject>" --note <perm-key>
+```
 
-Three one-time settings on the content repo make that real, and the workflow
-alone does not: make **`gates` a required status check** on `main` (Settings →
-Rules → Rulesets), and enable **Allow auto-merge** and **Automatically delete
-head branches** (Settings → General → Pull Requests). Without the required
-check a red PR still merges on a click; without auto-merge every green run
-waits on a human; without branch deletion `zettel/run-*` branches accumulate,
-since sessions cannot delete remote branches. Full walkthrough:
+Then link the MOC from `INDEX.md` by hand — INDEX links only to MOCs, MOCs link
+to notes. Each generator refuses at write time exactly what the lints refuse at
+gate time: a second reference for a source already on file, a relation outside
+the [FR-5 taxonomy](references/note-types.md), a literature note with no
+locator, a map that lists nothing.
+
+### Find out what you have
+
+```sh
+query.py --repo <repo> "<topic>" [--top 15] [--json] [--mermaid] [--include-raw] [--gaps N]
+query.py --repo <repo> --from-file raw/<id>-<slug>.txt          # passage mode
+query.py --repo <repo> "<topic>" --file-gaps g1,g3              # file a selection
+```
+
+Read-only unless you pass `--file-gaps`. It ranks every note, shows the typed
+links between what it found, names eight kinds of gap in the order they should
+be worked, and — in passage mode — reads a captured source paragraph by
+paragraph and tells you which passages the base already covers and which are
+new. Details: [`references/query.md`](references/query.md).
+
+### Do a whole piece of work, through the lock and the gates
+
+```sh
+session_cycle.sh ask    --repo <repo> --question "..."
+session_cycle.sh ingest --repo <repo> --source ~/paper.pdf --title "..."
+session_cycle.sh query  --repo <repo> --from-query "..."
+```
+
+Each claims the lock, opens a run branch, and prints a checklist naming the
+concrete commands for the rest of the job. These are what the slash commands
+run. Exit 3 means a scheduled run holds the lock.
+
+### Run the gates
+
+```sh
+remote_cycle.sh gates --repo <repo>
+```
+
+Runs all six exactly as CI runs them: `verify_refs` (offline), `build_manifest
+--check`, `lint_citations`, `lint_links`, `lint_skills`, `check_skill_sandbox`.
+`remote_cycle.sh finish` runs them itself and refuses to push a red branch.
+
+## Keeping it growing
+
+A knowledge base that only grows when you sit down with it is a notebook. The
+point of this plugin is the scheduled run.
+
+**First, three one-time settings on your content repo.** Nothing works properly
+without the first one, and the workflow file alone does not do it:
+
+1. **Make `gates` a required status check on `main`** (Settings → Rules →
+   Rulesets). Without it a red pull request still merges on a click. The gate
+   workflow itself is installed for you at genesis.
+2. **Allow auto-merge** (Settings → General → Pull Requests), so a green run
+   lands without waiting for you.
+3. **Automatically delete head branches** (same page) — sessions cannot delete
+   remote branches, so `zettel/run-*` accumulates forever otherwise.
+
+**Then pick a scheduler:**
+
+| | Runs when | Hard cost cap | Needs |
+|---|---|---|---|
+| **Laptop cron / launchd** | the machine is awake | **yes** (`budget.usd`) | a local clone, `claude` on PATH |
+| **Desktop / Cowork task** | the app is open | yes | the app running |
+| **Cloud Routine** | always | no | a cloud environment + a Routine bound to the content repo |
+
+```sh
+maintenance_run.sh --repo <repo> --mailto you@example.org [--dry-run]
+```
+
+is the entry point for the first two. It serializes on a lock, runs the 8-agent
+orchestra in isolated worktrees, then **re-runs the gates itself and pushes only
+if they pass** — the model commits, the wrapper pushes, so a runaway or
+budget-cut run can never push unlinted state.
+
+The cloud Routine is the only path that grows the base with your laptop closed,
+and it is the one with no per-run dollar cap. Full walkthroughs, including a
+crontab line and a launchd plist:
+[`references/scheduling.md`](references/scheduling.md) and
 [`references/remote-execution.md`](references/remote-execution.md).
 
-### Remote reading (Mode B)
+## Reading your notes
 
-No local clone (claude.ai, the API)? `scripts/fetch_remote.py` fetches the
-manifest and specific notes from inside a code-execution container — raw URLs
-for public repos, the GitHub API with a `GITHUB_TOKEN` env var for private
-ones (private repos otherwise require the GitHub MCP connector). All five
-remote paths: [`references/two-mode-access.md`](references/two-mode-access.md).
+They are plain markdown in a git repository. Clone it and open the directory in
+[Obsidian](https://obsidian.md) — the `[[key]]` links and the `INDEX.md` →
+MOC → note layering are exactly the shape Obsidian's graph expects, and note
+frontmatter carries `aliases` so a bare `[[202608301412]]` resolves too. Any
+editor works; nothing here is Obsidian-specific.
 
-### The gates — run before every commit
-
-```sh
-scripts/verify_refs.py    --repo <content-repo> --mailto you@example.org
-scripts/build_manifest.py --repo <content-repo>
-scripts/lint_citations.py --repo <content-repo>
-scripts/lint_links.py     --repo <content-repo>
-scripts/lint_skills.py    --repo <content-repo>
-```
-
-Or run the whole list exactly as CI will, including the sandbox check:
+Without a local clone at all — from claude.ai, or an API session — there is a
+remote-read path that walks `manifest.json` and fetches individual notes:
 
 ```sh
-scripts/remote_cycle.sh gates --repo <content-repo>
+fetch_remote.py --owner <you> --repo <content-repo> --keys <key1>,<key2>
 ```
 
-`remote_cycle.sh finish` runs that itself before it commits, and refuses to
-push a branch whose gates fail — a session used to push red and end, leaving
-CI to report the failure into an empty room. `--no-gates` hands a red state to
-CI deliberately, and says so in `log.md`.
+Public repos need no token; private ones read `GITHUB_TOKEN` from the
+environment. All five remote paths, in preference order:
+[`references/two-mode-access.md`](references/two-mode-access.md).
 
-The lints exit non-zero and print `FILE⇥RULE⇥REASON` for each problem.
-`lint_links.py` also enforces the inquiry lifecycle (AC-6).
-`verify_refs.py --offline` verifies from `raw/` captures only when there is no
-network.
+## When something fails
+
+**Exit codes**, shared across every entry point:
+
+| | Means |
+|---|---|
+| `0` | fine |
+| `1` | the tool did its job and the answer is no — a lint found violations, a fetch failed |
+| `2` | you called it wrong |
+| `3` | *(cycle scripts only)* a live run holds the lock. **Stand down. This is a success.** |
+
+Lints print one line per problem as `FILE⇥RULE⇥REASON`. The common ones:
+
+| Rule | Means | Fix |
+|---|---|---|
+| `unverified-reference` | `verification.verified` is not true | capture the source with `fetch_source.py`, then re-run `verify_refs.py` |
+| `uncited-claim` | a permanent note makes a sourced claim but links no verified reference | link the reference, or soften the claim to what you can support |
+| `missing-locator` | a literature note has no page/section | add `--locator` — re-capture it, do not hand-edit |
+| `duplicate-source` | two reference notes for one source | keep one; `capture.py reference` refuses the second and names the first |
+| `moc-empty` | a map of content lists nothing | `capture.py moc ... --note <key>` writes one that cannot be empty |
+| `unresolved-link` / `unresolved-wikilink` | a link target is not in the manifest | rebuild the manifest, or fix the key |
+| `contested-undersourced` | a note tagged `contested` rests on fewer than 3 distinct sources | find more sources, or drop the tag |
+
+**The rule that governs all of it: never make a gate pass by weakening it**,
+deleting the offending note, or back-filling a citation nobody verified. Fix the
+note or capture the source. Every rule and what trips it:
+[`references/quality-gates.md`](references/quality-gates.md) and
+[`references/citation-rules.md`](references/citation-rules.md).
+
+Two failures that look like bugs and are not:
+
+- **A reference verified by DOI still fails the merge gate.** The gate re-runs
+  verification *offline*, on purpose, so no gate can pass because of a lucky
+  live lookup. Capture the source into `raw/` and it passes. `capture.py
+  reference` tells you this when it writes such a note.
+- **A cycle "did nothing".** Usually a stand-down on the lock, not a crash.
+  Check `log.md` and the release reason on the `zettel/lock` branch.
+
+## Configuration
+
+`config.yml` in your content repo. Genesis writes every required key; the
+optional ones can be absent and mean the default shown.
+
+| Key | Req | Default | Controls |
+|---|---|---|---|
+| `topics` | ● | your `--topics` | what scheduled runs research |
+| `cadence` | ● | `weekly` | free text or cron; how often you intend to run |
+| `budget.usd` / `budget.max_turns` | ● | `5` / `40` | per-run caps (laptop path only) |
+| `autonomy_level` | ● | `suggest` | reserved; no code reads it yet |
+| `content_repo.{name,owner,visibility}` | ● | from genesis | visibility drives raw-URL vs API paths in the manifest |
+| `embedding.enabled` / `.model` | ● | `false` / MiniLM | opt-in embedding similarity for the sweep |
+| `models.strong` / `.cheap` | ● | Opus / Sonnet | which tier each agent runs on |
+| `connector_cadence` / `skill_smith_cadence` | ● | `weekly` / `monthly` | sub-cadences |
+| `trial_questions` | ○ | `3` | questions per A/B arm when a child skill is proposed |
+| `fetch.mailto` | ○ | *(empty)* | **your real email, sent to Crossref, Unpaywall and OpenAlex.** Unpaywall is skipped without it, so open-access resolution degrades |
+| `fetch.renderer` | ○ | `none` | `jina` or `firecrawl` for JavaScript-only pages — opt-in, because every rendered URL goes to that third party |
+| `fetch.max_capture_mb` | ○ | `25` | a bigger capture fails the citation lint |
+| `query.stale_inquiry_days` | ○ | `30` | when an open question becomes a gap |
+| `query.same_claim` / `.touches` | ○ | `0.35` / `0.08` | passage-mode bands ([why these numbers](references/query.md)) |
+
+Optional keys are deliberately outside the required set, so a repo scaffolded
+before they existed keeps working with no migration.
 
 ## How notes are named
 
@@ -383,65 +434,60 @@ Filenames and `[[links]]` both use this key, so a vault listing reads as titles
 rather than timestamps. The trailing id is immutable and the slug is frozen at
 creation — rewording a note's `title` never moves the file or breaks a link.
 
-## Layout
+## Reference
 
-```
-.claude-plugin/plugin.json   plugin manifest
-skills/zettel-bootstrap/     SKILL.md (the router)
-skills/zettel-{ingest,query,ask}/   one sub-skill per session flow (slash commands)
-references/                  architecture, note types, citation rules
-templates/                   note, config, and child-skill templates
-agents/                      the 8 subagent definitions
-scripts/                     genesis, capture + note generators, drop ingest, fetch,
-                             query, session flows, maintenance, manifest, verification, lints
-  zettel_lib/                shared library (see note below)
-  csl/                       bundled Chicago style + provenance
-ci/                          content-repo gate workflow + cloud env setup
-tests/                       pytest suite and cassettes
-.claude/CLAUDE.md            guidance for developing the skill itself
-docs/REQUIREMENTS.md         the specification, with amendments
-PLAN.md                      phase status and build order
-```
+Twelve documents, read on demand. Start with the first three if you want to
+understand the system rather than operate it.
 
-`scripts/zettel_lib/` is an addition to the layout the spec prescribes: the
-Python entry points share frontmatter parsing, note naming, repo access, HTTP,
-citation rendering, reference building, similarity scoring, and the git lock,
-and duplicating those across twenty-one entry points would guarantee they drift.
+**Understand it**
+
+| | |
+|---|---|
+| [`architecture.md`](references/architecture.md) | the two repos, the Raw/Knowledge/Skill layers, and why the gates run in that order |
+| [`note-types.md`](references/note-types.md) | every note type, the 1-1-1 rule, and the eight link relations |
+| [`quality-gates.md`](references/quality-gates.md) | each gate, what it enforces, what it rejects, and where it binds |
+
+**Do something**
+
+| | |
+|---|---|
+| [`tutorial.md`](references/tutorial.md) | genesis to first scheduled run, end to end |
+| [`commands.md`](references/commands.md) | every entry point and every flag |
+| [`capture.md`](references/capture.md) | the four routes in, inquiries, the drop box, session flows |
+| [`query.md`](references/query.md) | ranking, the graph, passage mode, the eight gap kinds |
+| [`scheduling.md`](references/scheduling.md) | cron, launchd, desktop tasks, and what a run guarantees |
+
+**Deeper**
+
+| | |
+|---|---|
+| [`citation-rules.md`](references/citation-rules.md) | CSL-JSON, Chicago rendering, verification, source tiers |
+| [`remote-execution.md`](references/remote-execution.md) | Routines, the git-branch lock, cloud environments, content-repo CI |
+| [`two-mode-access.md`](references/two-mode-access.md) | reading a base with no local clone |
+| [`serendipity.md`](references/serendipity.md) | how cross-cluster link candidates are chosen |
+| [`orchestra.md`](references/orchestra.md) | the 8 subagents, their tiers, and who may write what |
+| [`skill-emergence.md`](references/skill-emergence.md) | how the base proposes, trials and promotes its own child skills |
+
+The specification itself is [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) —
+FR-x, AC-x, NFR-x, QA-x, plus the numbered amendments that record every place
+implementation forced a change. Code comments cite it by number.
 
 ## Working on the skill itself
 
-[`.claude/CLAUDE.md`](.claude/CLAUDE.md) has the conventions, the environment's sharp edges,
-and the one invariant that governs every change: never make a gate pass by
-weakening it.
-
-## Tests
+[`.claude/CLAUDE.md`](.claude/CLAUDE.md) has the conventions, the environment's
+sharp edges, and the one invariant that governs every change. [`PLAN.md`](PLAN.md)
+tracks phase status.
 
 ```sh
 pip install -r requirements-dev.txt
-./smoke_test.sh
+./smoke_test.sh          # the acceptance checklist, executable; exit 0 or it is not done
 ```
 
-`smoke_test.sh` runs the full pytest suite (537 tests) plus an end-to-end
-genesis scaffold. To run pytest alone, use the virtualenv's interpreter —
-`pytest` is generally not installed in the system python:
-
-```sh
-.venv/bin/python -m pytest -q
-```
-
-Three acceptance checks cannot run in a sandboxed or offline environment and
-are **manual steps on a networked machine**:
-
-- `gh repo create` — the live publish path (`--no-remote` covers the rest).
-- Live metadata lookups — `verify_refs.py --repo <repo> --mailto you@example.org`
-  against a real DOI and ISBN. The suite covers the parsing and state-writing
-  with recorded-shape cassettes; see [`tests/cassettes/README.md`](tests/cassettes/README.md).
-- Live `sentence-transformers` scoring — the embedding path is unit-tested with
-  an injected encoder; downloading real model weights needs network access to
-  HuggingFace.
-
-The maintenance runner is tested with a stub `claude` binary (locking, gate
-enforcement, push authority) plus a real capped headless run where possible.
+`smoke_test.sh` runs the full suite (630 tests) plus an end-to-end genesis
+scaffold. To run pytest alone use the virtualenv's interpreter — `pytest` is
+generally not in the system python. Three acceptance checks need a networked
+machine and are manual: `gh repo create`, live metadata lookups, and live
+`sentence-transformers` scoring.
 
 ## Security
 
