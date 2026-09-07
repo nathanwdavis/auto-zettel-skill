@@ -4,7 +4,7 @@ description: Maps what a zettel-bootstrap Zettelkasten content repo already know
 license: MIT
 allowed-tools: Read, Bash, Glob, Grep
 metadata:
-  version: 0.2.0
+  version: 0.3.0
   parent: zettel-bootstrap
 ---
 
@@ -28,7 +28,8 @@ SCRIPTS="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$(readlink -f "$0")")/../.." && 
 It ranks every note against the query, groups the matches by type — claims
 (permanent notes), literature notes, sources on file with their verification
 state, maps of content — lists the open inquiries that touch the topic, adds
-the notes one link away, and names the gaps.
+the notes one link away, and names the gaps. Add `--mermaid` when the shape of
+the neighbourhood is the answer; it appends a diagram to the same report.
 
 The script writes nothing. Not a note, not an inquiry, not even a log line.
 
@@ -44,20 +45,29 @@ base can give — far better than a weak match dressed up as coverage.
 
 ## Step 3 — end with the gaps, and offer
 
-The report names three kinds of absence, each wanting different work:
+The report names eight kinds of absence, each carrying an id and listed in the
+order they should be worked:
 
 | Gap | What it means | Who closes it |
 |---|---|---|
-| terms the base never uses | nothing to read; only research helps | a researcher |
-| matches, but no permanent note | material captured, nothing distilled into a claim | a synthesizer |
-| matched notes no MOC reaches | they exist but INDEX cannot reach them | a librarian |
+| `unresearched` | terms the base never uses; only research helps | a researcher |
+| `weak-sourcing` | a claim resting only on general-web sources | a researcher |
+| `stale-inquiry` | a question asked long ago and never worked | whoever works or archives it |
+| `undistilled` | material captured, nothing distilled into a claim | a synthesizer |
+| `unsummarised-reference` | a source on file that nobody has read | a synthesizer |
+| `orphan-claim` | a claim nothing else links to | a connector |
+| `unmapped` | notes exist but INDEX cannot reach them | a librarian |
+| `raw-mentions` | a term only a `raw/` capture uses (needs `--include-raw`) | a synthesizer |
 
-List them and say that on the user's word you will act. **Never file unasked.**
-Then, when told to, pick one:
+List them **with their ids** and say that on the user's word you will act.
+**Never file unasked.** Then, when told to, pick one:
 
 ```sh
-# File the gaps for the next scheduled run to pick up:
+# File every gap for the next scheduled run to pick up:
 "$SCRIPTS/query.py" --repo <content-repo> "$ARGUMENTS" --file-gaps
+
+# Or just the ones the user chose:
+"$SCRIPTS/query.py" --repo <content-repo> "$ARGUMENTS" --file-gaps g1,g3
 
 # Or file them AND work them now, in this session:
 "$SCRIPTS/session_cycle.sh" query --repo <content-repo> --from-query "$ARGUMENTS"

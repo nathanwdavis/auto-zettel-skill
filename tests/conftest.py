@@ -332,6 +332,48 @@ def two_cluster_repo(tmp_path: Path) -> Path:
     return build_two_cluster_repo(tmp_path / "kb")
 
 
+#: Prose long enough to clear passages.MIN_CHUNK_TOKENS, one paragraph per page.
+#: The first restates the fixture's own permanent note, the second is unrelated:
+#: a passage fixture that only contains novel text cannot show the tool telling
+#: "already covered" from "worth writing".
+CAPTURE_PAGES = [
+    "Atomic notes compound over time because each single idea can be reused "
+    "inside more than one later context, which is the whole point of keeping "
+    "notes atomic in a slip-box rather than filing them by source.",
+    "Searing a steak over very high heat for a short period on each side, then "
+    "resting the meat for the same period again, produces a crust without "
+    "overcooking the interior of the cut of beef itself.",
+    "The quantity of rainfall recorded in the coastal catchment during the "
+    "monsoon exceeded every prior measurement taken at that gauging station "
+    "since instrumentation was first installed there.",
+]
+
+
+@pytest.fixture
+def capture_repo(clean_repo: Path) -> Path:
+    """The clean repo plus one ingested three-page PDF.
+
+    Built by DROPPING the file through ingest_drops rather than hand-writing the
+    artifacts, so the fixture is the real shape: a reference note, the capture,
+    and `raw/<id>-<slug>.txt` carrying the extraction preamble and `--- page N ---`
+    markers. Hand-wiring it would let the naming contract change underneath the
+    passage tests without any of them noticing.
+    """
+    drop_file(clean_repo, "a-passage-paper.pdf",
+              make_pdf(title="A Passage Paper", author="Tester, T", pages=CAPTURE_PAGES))
+    result = run_script("ingest_drops.py", clean_repo, "--offline")
+    assert result.returncode == 0, result.stderr
+    return clean_repo
+
+
+@pytest.fixture
+def orphan_capture_repo(clean_repo: Path) -> Path:
+    """A raw/ extraction that no reference note claims."""
+    (clean_repo / "raw" / "202608309999-unclaimed.txt").write_text(
+        "\n\n".join(CAPTURE_PAGES), encoding="utf-8")
+    return clean_repo
+
+
 @pytest.fixture
 def broken_repo(clean_repo: Path):
     """Yields a mutator that breaks the clean repo, then rebuilds the manifest."""

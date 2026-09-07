@@ -15,28 +15,22 @@ at the permanent notes that answered it.
 from __future__ import annotations
 
 import json
-import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from zettel_lib import naming
+from zettel_lib import graph, naming
 from zettel_lib.cli import EXIT_USAGE, Violation, base_parser, open_repo, report
 from zettel_lib.frontmatter import FrontmatterError, Note
 from zettel_lib.repo import INQUIRY_STATUSES, RELATIONS, ContentRepo, ContentRepoError
 
-WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]")
-
-
-def resolve(target: str, keys: set[str], id_to_key: dict[str, str]) -> str | None:
-    """Resolve a reference to a note key, accepting a bare timestamp ID."""
-    target = target.strip()
-    if target in keys:
-        return target
-    if naming.is_id(target) and target in id_to_key:
-        return id_to_key[target]
-    return None
+# Re-exported, not redefined: the pattern and the resolver moved to
+# zettel_lib.graph so the lint, the citation lint and the query report walk one
+# graph. lint_skills and skill_trial import both names from here, so this stays
+# their address -- the same shape ingest_drops uses for the reference builder.
+WIKILINK = graph.WIKILINK
+resolve = graph.resolve
 
 
 def lint(repo: ContentRepo) -> list[Violation]:

@@ -406,6 +406,110 @@ performs, and gave each one a name a user can invoke:
   reference for what each note type carries; they are no longer the way to
   write one.
 
+### A13 — The query becomes a map: passages, edges, and ranked gaps (2026-09-07, FR-4, FR-5, FR-6, FR-12, FR-24, QA-3, §7, A9, A10)
+
+Phase 3 of the session-flow round (PLAN.md round 8). `query.py` reported four
+grouped lists and three unranked, all-or-nothing gaps. Three changes, all
+read-only by default, and A9's rule is untouched: `--file-gaps` remains the
+only path on which a query writes anything.
+
+**Passage mode.** `query.py --from-file raw/<id>-<slug>.txt` cuts a capture's
+text extraction into the passages a person considers one at a time, scores each
+against the base's `permanent` and `literature` notes, and sorts them into
+`same-claim` / `touches` / `none`. Each `none` chunk comes back as a ready-to-run
+`capture.py literature` command with its locator filled in. It refuses
+`--file-gaps` outright: a literature note needs prose a person writes, and
+auto-filing would mint the bodyless notes `capture.py` exists to prevent.
+
+Classification takes **two** signals, and the second is not optional. Measured
+against a live content repository (237 claim-bearing notes, 849 passages from 25
+captures), 87 passages matched on fewer than two distinct terms and 47 of those
+cleared the lower band on score alone — almost all OCR noise where one accidental
+word carries the whole cosine. So a passage must clear a score AND share two
+terms, and one too short to have a meaningful vector is not scored. The bands are
+absolute cosines and therefore corpus-size dependent, which is why they are
+configurable and why the defaults were calibrated on a real base.
+
+Locators are `p. N` where the extraction has page markers and `para. N` where it
+does not. Every capture taken before A12 shipped those markers is unpaginated, so
+the fallback is the common case; inventing `p. 1` would put a false citation into
+a note no gate can catch.
+
+**The graph.** The JSON gains `edges` (the eight FR-5 relations, plus `mentions`
+for a body wikilink — deliberately outside the taxonomy, since `lint_links` would
+fail it inside a note's `links`) and `moc_membership`. A pair that is both
+typed-linked and wikilinked yields two edges, because a curated relation and a
+passing mention are different facts. `--mermaid` adds a diagram of that subgraph
+as a **section of the report**, not a replacement for it. The link traversal
+moved to `zettel_lib/graph.py`, which four entry points had each written out
+themselves.
+
+**Ranked, addressable gaps.** Five new kinds — `unsummarised-reference`,
+`weak-sourcing`, `orphan-claim`, `stale-inquiry`, and opt-in `raw-mentions`
+(`--include-raw`) — and an explicit rank table replacing the implicit order of
+the `if` blocks that produced them, which `session_query_prompt.md` already
+depended on. `gaps` stays a list of strings, each prefixed with its id; the
+structure lives in a sibling `gap_details`. `--file-gaps g1,g3` files a
+selection, `--gaps N` caps after ranking, and an unknown id exits 2 having
+written nothing at all.
+
+Two rules are worth stating because they are easy to get backwards. First,
+**`weak-sourcing` is the same predicate `lint_citations` warns on**, importing
+its tiers (now in `repo.py` beside `RELATIONS`) rather than restating them. Second,
+**gaps have suggestions; warnings do not**: a note failing the lint's
+`uncited-claim` violation is reported as a warning, never as a gap, because a
+gate's finding is the gate's to report and a query offering a follow-up for it
+would read as a way around it.
+
+Thresholds come from an optional `query:` block in `config.yml`
+(`stale_inquiry_days`, `same_claim`, `touches`), following the `fetch:` and
+`trial_questions` precedent: absent keys mean the documented defaults, and none
+of them joins `REQUIRED_CONFIG_KEYS`, which would fail `--check-config` on every
+content repo that already exists.
+
+`stale-inquiry` is the one part of the report that is not deterministic, because
+it is about how long a question has been open. The threshold and the measured
+age are both in the output so it explains itself, and `references/query.md`
+states the exception rather than leaving it to be discovered.
+
+### A14 — Verification records are evidence: an inconclusive re-check never downgrades one (2026-09-07, FR-10, FR-22, NFR-5, G3)
+
+`verify_refs.py` replaced a note's verification record with a weaker one
+whenever a registry lookup came back empty — and it could not tell an empty
+answer from no answer, because `http.get_json` returned `None` for a 404, a
+retried-out 503, and an unreadable body alike.
+
+Open Library made that a standing defect. `/api/books?bibkeys=…&jscmd=data`
+began answering `200 {}` for books plainly in its index, so every ISBN-verified
+reference was marked as having a rotted identifier on every run. Four
+consecutive cycles of the live content repository hand-restored the notes; one
+offline run stripped `identifier_check` from 22 reference notes and the cycle
+committed it before noticing.
+
+Three changes:
+
+- `http.get_json_result` reports whether the server answered. A 200 that parsed
+  is conclusive, and so is a 404 — "not found" IS an answer. A 5xx surviving
+  every retry, or a 200 whose body will not parse, is not.
+- The identifier lookup becomes a tristate, and any registry that fails to
+  answer makes the whole lookup inconclusive even if a later one answers
+  negatively. On partial information, change nothing. The ISBN endpoint moves to
+  `openlibrary.org/search.json?isbn=`, which answers definitively (`numFound`).
+- `verify_note` keeps the record already on file when a re-check learns nothing
+  better, `--offline` carries `identifier_check` through (offline is
+  inconclusive about identifiers by definition), and `run()` builds the new
+  block FROM the old one rather than in place of it — assigning a freshly built
+  dict silently dropped every key the run did not produce.
+
+**This does not weaken the gate.** A registry that says "no such identifier"
+still records `identifier_check: failed` and still warns; only inconclusive
+checks changed behaviour. Measured against the live repository,
+`verify_refs.py --offline` rewrote 22 reference notes before and none after.
+
+The test suite had encoded the defect: its Open Library "miss" cassette was
+`200 {}`, the exact response the endpoint gives for books that exist. That
+response is now a fixture asserting the opposite.
+
 -----
 
 ## TL;DR

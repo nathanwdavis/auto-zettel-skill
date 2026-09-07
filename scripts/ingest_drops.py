@@ -236,10 +236,9 @@ def ingest_one(repo: ContentRepo, path: Path, *, mailto: str, offline: bool,
     text_path = None
     if text.strip() and ext != ".txt":
         text_path = raw_dir / f"{note_id}-{slug}.txt"
-        text_path.write_text(
-            f"Text extraction of {capture_path.name} (dropped as {path.name}); "
-            f"the {ext.lstrip('.')} file is the cited capture.\n\n{text}",
-            encoding="utf-8")
+        preamble = references.EXTRACTION_PREAMBLE.format(
+            capture=capture_path.name, dropped=path.name, kind=ext.lstrip("."))
+        text_path.write_text(f"{preamble}\n\n{text}", encoding="utf-8")
     side = sidecar_path(path)
     if side.exists():
         side.unlink()

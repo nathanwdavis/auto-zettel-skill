@@ -4,7 +4,7 @@ description: Ingests a reference source a user hands to this session - a PDF, ma
 license: MIT
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch
 metadata:
-  version: 0.2.0
+  version: 0.3.0
   parent: zettel-bootstrap
 ---
 
@@ -43,7 +43,12 @@ the exact command for each step that follows.
   you write can carry a real locator.
 
 What remains is the part only reading can do: decide what this source says
-that the base does not already know.
+that the base does not already know. The checklist opens with passage mode --
+`query.py --from-file <the extraction>` -- which scores the source paragraph by
+paragraph against the notes that already exist and tells you which passages are
+already covered, which are merely related, and which are new. Read those rather
+than the whole file: it is read-only, and it hands back a ready-to-run
+`capture.py literature` command, locator included, for each new one.
 
 ## The rules that bind here
 

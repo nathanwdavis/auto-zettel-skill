@@ -51,6 +51,17 @@ IDENTIFIER_FIELDS = ("doi", "isbn", "arxiv", "pmid", "url")
 PAGE_MARKER = "--- page {n} ---"
 PAGE_MARKER_RE = re.compile(r"^--- page (\d+) ---$", re.MULTILINE)
 
+#: The header ``ingest_drops`` writes at the top of every text extraction, and
+#: the pattern that recognises it again. Same argument as the page marker
+#: above: the writer and the reader must share one definition. Passage mode
+#: reads every paragraph of an extraction as candidate material, and this one
+#: is not from the source at all -- left unrecognised it becomes a "claim the
+#: base has nothing on", which is true and useless.
+EXTRACTION_PREAMBLE = ("Text extraction of {capture} (dropped as {dropped}); "
+                       "the {kind} file is the cited capture.")
+EXTRACTION_PREAMBLE_RE = re.compile(
+    r"^Text extraction of \S+ \(dropped as .+\); the \S+ file is the cited capture\.$")
+
 
 def now_date() -> str:
     return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")

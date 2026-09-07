@@ -170,11 +170,57 @@ def tfidf_vectors(docs: dict[str, str]) -> tuple[dict[str, dict[str, float]], di
 
 @dataclass(frozen=True)
 class QueryHit:
-    """One note scored against a free-text query, with the terms that matched."""
+    """One note scored against a free-text query, with the terms that matched.
+
+    ``shared`` is the number of DISTINCT terms the query and the note have in
+    common. Cosine alone cannot tell a real paraphrase from a coincidence: a
+    passage about searing steak scored 0.406 against a note on compounding
+    because both said "time", while a genuine restatement scored 0.536. The
+    difference was not the score -- it was that the coincidence rested on one
+    term and the restatement on thirteen. Passage mode reads this field for
+    exactly that reason; ``query.py``'s note ranking ignores it.
+    """
 
     key: str
     score: float
     evidence: tuple[str, ...] = field(default=())
+    shared: int = 0
+
+
+def query_vector(query: str, idf: dict[str, float]) -> dict[str, float]:
+    """The unit-normalised TF-IDF vector for a query, against a corpus's idf."""
+    q_counts = Counter(tokenize(query))
+    total = sum(q_counts.values())
+    if not total:
+        return {}
+    vec = {t: (c / total) * idf.get(t, 0.0) for t, c in q_counts.items()}
+    norm = math.sqrt(sum(v * v for v in vec.values())) or 1.0
+    return {t: v / norm for t, v in vec.items()}
+
+
+def score_against(q_vec: dict[str, float], vectors: dict[str, dict[str, float]],
+                  evidence_terms: int = 5) -> list[QueryHit]:
+    """Rank pre-built document vectors against a pre-built query vector.
+
+    Split out from ``score_query`` so a caller with MANY queries against ONE
+    corpus builds the corpus once. Passage mode scores every chunk of a source
+    against the whole note graph; rebuilding the TF-IDF vectors per chunk made
+    that quadratic in the size of a book.
+    """
+    hits: list[QueryHit] = []
+    for key, vec in vectors.items():
+        shared = set(q_vec) & set(vec)
+        if not shared:
+            continue
+        contributions = {t: q_vec[t] * vec[t] for t in shared}
+        score = sum(contributions.values())
+        if score <= 0:
+            continue
+        evidence = tuple(t for t, _ in sorted(contributions.items(),
+                                              key=lambda kv: (-kv[1], kv[0]))[:evidence_terms])
+        hits.append(QueryHit(key, round(score, 6), evidence, len(shared)))
+    hits.sort(key=lambda h: (-h.score, h.key))
+    return hits
 
 
 def score_query(query: str, docs: dict[str, str],
@@ -190,25 +236,7 @@ def score_query(query: str, docs: dict[str, str],
     if not q_tokens or not docs:
         return [], sorted(set(q_tokens))
     vectors, idf = tfidf_vectors(docs)
-    q_counts = Counter(q_tokens)
-    total = sum(q_counts.values())
-    q_vec = {t: (c / total) * idf.get(t, 0.0) for t, c in q_counts.items()}
-    norm = math.sqrt(sum(v * v for v in q_vec.values())) or 1.0
-    q_vec = {t: v / norm for t, v in q_vec.items()}
-
-    hits: list[QueryHit] = []
-    for key, vec in vectors.items():
-        shared = set(q_vec) & set(vec)
-        if not shared:
-            continue
-        contributions = {t: q_vec[t] * vec[t] for t in shared}
-        score = sum(contributions.values())
-        if score <= 0:
-            continue
-        evidence = tuple(t for t, _ in sorted(contributions.items(),
-                                              key=lambda kv: (-kv[1], kv[0]))[:evidence_terms])
-        hits.append(QueryHit(key, round(score, 6), evidence))
-    hits.sort(key=lambda h: (-h.score, h.key))
+    hits = score_against(query_vector(query, idf), vectors, evidence_terms)
     missing = sorted(t for t in set(q_tokens) if t not in idf)
     return hits, missing
 

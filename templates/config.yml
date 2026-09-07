@@ -37,6 +37,17 @@ skill_smith_cadence: "monthly"
 # so pre-Phase-4 content repos keep working without a config migration.
 trial_questions: 3
 
+# Query and passage analysis (amendment A13). All optional; absent keys mean the
+# defaults shown, so older content repos keep working without a migration.
+query:
+  stale_inquiry_days: 30   # a matched `new`/`in-progress` inquiry older than this
+                           # is reported as a gap. Not derived from `cadence`,
+                           # which is free text as often as it is cron.
+  same_claim: 0.35         # passage-mode bands: a chunk scoring at or above
+  touches: 0.08            # same_claim restates a note, one above touches is
+                           # related, anything else is new. The measured
+                           # calibration behind these is in references/query.md.
+
 # Source fetching (amendment A11). All optional; absent keys mean the defaults
 # shown, so older content repos keep working without a migration.
 fetch:

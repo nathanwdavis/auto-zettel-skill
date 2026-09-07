@@ -84,6 +84,68 @@ class CassetteTransport:
         raise NetworkUnavailable(f"no cassette for {url}")
 
 
+@dataclass(frozen=True)
+class JsonResult:
+    """A JSON GET, and whether the server actually answered the question.
+
+    ``get_json`` collapses "the registry says this does not exist" and "the
+    registry could not be read" into the same ``None``, and callers that treat
+    the second as the first make claims the evidence does not support. That is
+    not hypothetical: Open Library's ``/api/books`` began answering ``200 {}``
+    for books that plainly exist, and every ISBN-verified reference in a live
+    repository was marked as having a rotted identifier on every run.
+
+    ``conclusive`` means the registry answered the question, whatever the
+    answer was: a 200 whose body parsed, or a 404/410 saying the identifier is
+    not there -- "not found" IS an answer, and it arrives as
+    ``(None, 404, True)``. It is FALSE when no answer was obtained: a 429 or
+    5xx that survived every retry, or a 200 whose body will not parse. So
+    ``conclusive`` does not imply ``data is not None``; a caller that needs a
+    payload must still check for one.
+    """
+
+    data: object | None
+    status: int
+    conclusive: bool
+
+
+def get_json_result(
+    url: str,
+    *,
+    transport: Transport = requests_transport,
+    user_agent: str = "zettel-bootstrap/0.1",
+    sleep: Callable[[float], None] = time.sleep,
+) -> JsonResult:
+    """GET a URL, backing off on 429/5xx, reporting whether the answer is one.
+
+    Crossref revised its rate limits effective 2025-12-01, so 429s are expected
+    on the public pool and are retried with exponential backoff, honouring
+    ``Retry-After`` when the server sends it (FR-10). A 429 or 5xx that
+    survives every retry is NOT conclusive -- the registry never answered.
+    """
+    headers = {"User-Agent": user_agent, "Accept": "application/json"}
+    delay = 2.0
+    resp = None
+    for attempt in range(MAX_RETRIES):
+        resp = transport(url, headers)
+        if resp.status == 200:
+            try:
+                return JsonResult(resp.json(), 200, True)
+            except json.JSONDecodeError:
+                # The server said OK and then sent something unreadable. That
+                # is a broken answer, not a negative one.
+                return JsonResult(None, 200, False)
+        if resp.status in (429, 500, 502, 503, 504) and attempt < MAX_RETRIES - 1:
+            wait = float(resp.headers.get("Retry-After", delay) or delay)
+            sleep(wait)
+            delay *= 2
+            continue
+        break
+    status = resp.status if resp is not None else 0
+    # 404 and 410 are the registry answering; 429/5xx are it failing to.
+    return JsonResult(None, status, status in (404, 410))
+
+
 def get_json(
     url: str,
     *,
@@ -93,26 +155,11 @@ def get_json(
 ):
     """GET a URL, backing off on 429/5xx. Returns parsed JSON or ``None``.
 
-    Crossref revised its rate limits effective 2025-12-01, so 429s are expected
-    on the public pool and are retried with exponential backoff, honouring
-    ``Retry-After`` when the server sends it (FR-10).
+    The shape every caller that only needs the payload still uses. Callers that
+    must tell "absent" from "unreachable" want ``get_json_result``.
     """
-    headers = {"User-Agent": user_agent, "Accept": "application/json"}
-    delay = 2.0
-    for attempt in range(MAX_RETRIES):
-        resp = transport(url, headers)
-        if resp.status == 200:
-            try:
-                return resp.json()
-            except json.JSONDecodeError:
-                return None
-        if resp.status in (429, 500, 502, 503, 504) and attempt < MAX_RETRIES - 1:
-            wait = float(resp.headers.get("Retry-After", delay) or delay)
-            sleep(wait)
-            delay *= 2
-            continue
-        return None
-    return None
+    return get_json_result(url, transport=transport, user_agent=user_agent,
+                           sleep=sleep).data
 
 
 def post_json(

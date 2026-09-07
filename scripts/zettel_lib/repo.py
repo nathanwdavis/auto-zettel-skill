@@ -26,6 +26,15 @@ RELATIONS = frozenset({
     "historical-connection", "elaborates", "refutes", "source",
 })
 
+#: The QA-3 source tiers, strongest first. Lives here for the same reason
+#: RELATIONS does: three entry points read them -- lint_citations (which warns
+#: on a claim grounded only in the weak tier), capture.py (which refuses to
+#: WRITE a tier outside the set), and query.py (whose `weak-sourcing` gap must
+#: be the SAME predicate the lint warns on, not a second one wearing the name).
+SOURCE_TIERS = ("peer-reviewed", "primary-text", "reputable-secondary", "general-web")
+STRONG_TIERS = frozenset({"peer-reviewed", "primary-text", "reputable-secondary"})
+WEAK_TIER = "general-web"
+
 #: Every FR-2 key, as dotted paths. The one list both maintenance paths
 #: validate against (AC-2): the laptop wrapper used to carry its own copy and
 #: the remote path had none, so a content repo missing `cadence` ran fine on
@@ -130,24 +139,64 @@ class ContentRepo:
 
 DEFAULT_MAX_CAPTURE_MB = 25.0
 
+#: query.py's thresholds (amendment A13). Optional, like `fetch:` and
+#: `trial_questions` before them: absent keys mean these values, so a content
+#: repo scaffolded before Phase 3 keeps working with no migration. None of them
+#: joins REQUIRED_CONFIG_KEYS -- adding one would fail --check-config on every
+#: repository that already exists.
+DEFAULT_STALE_INQUIRY_DAYS = 30.0
+DEFAULT_SAME_CLAIM = 0.35
+DEFAULT_TOUCHES = 0.08
 
-def max_capture_mb(cfg: dict) -> float:
-    """config fetch.max_capture_mb as a number, defaulting when absent (A11).
 
-    A non-numeric value is a configuration error and says so, rather than a
-    ValueError from inside a gate.
+def positive_number(cfg: dict, dotted: str, default: float) -> float:
+    """A positive numeric config value, defaulting when the key is absent.
+
+    A bad value is a configuration error and says which key, rather than a
+    ValueError surfacing from inside a gate with no clue where it came from.
     """
-    raw = dig(cfg, "fetch.max_capture_mb")
+    raw = dig(cfg, dotted)
     if raw is None or raw == "":
-        return DEFAULT_MAX_CAPTURE_MB
+        return default
     try:
         value = float(raw)
     except (TypeError, ValueError):
         raise ContentRepoError(
-            f"config.yml fetch.max_capture_mb must be a number, got {raw!r}") from None
+            f"config.yml {dotted} must be a number, got {raw!r}") from None
     if value <= 0:
-        raise ContentRepoError(f"config.yml fetch.max_capture_mb must be positive, got {raw!r}")
+        raise ContentRepoError(f"config.yml {dotted} must be positive, got {raw!r}")
     return value
+
+
+def max_capture_mb(cfg: dict) -> float:
+    """config fetch.max_capture_mb as a number, defaulting when absent (A11)."""
+    return positive_number(cfg, "fetch.max_capture_mb", DEFAULT_MAX_CAPTURE_MB)
+
+
+def stale_inquiry_days(cfg: dict) -> float:
+    """How old an open inquiry must be before query.py reports it as a gap.
+
+    Deliberately NOT derived from `cadence`, which is free text ("weekly on
+    Sunday at 06:00") as often as it is cron: computing days from that would be
+    a guess wearing the clothes of a calculation.
+    """
+    return positive_number(cfg, "query.stale_inquiry_days", DEFAULT_STALE_INQUIRY_DAYS)
+
+
+def passage_bands(cfg: dict) -> tuple[float, float]:
+    """The (same-claim, touches) score bands for passage mode.
+
+    Returned together because they are one decision: the calibration behind the
+    defaults is in zettel_lib/passages.py, and a repo that moves one without
+    the other gets a band ordering that cannot classify anything.
+    """
+    same = positive_number(cfg, "query.same_claim", DEFAULT_SAME_CLAIM)
+    touches = positive_number(cfg, "query.touches", DEFAULT_TOUCHES)
+    if touches >= same:
+        raise ContentRepoError(
+            f"config.yml query.touches ({touches}) must be below query.same_claim "
+            f"({same}); a passage cannot be a weaker match than the weakest match")
+    return same, touches
 
 
 def dig(data: dict, dotted: str):

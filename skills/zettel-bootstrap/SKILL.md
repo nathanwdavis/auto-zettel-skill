@@ -4,7 +4,7 @@ description: Scaffolds and perpetually grows a citation-grounded Zettelkasten kn
 license: MIT
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch
 metadata:
-  version: 0.2.0
+  version: 0.3.0
   phase: "4 (skill emergence)"
 ---
 
@@ -136,14 +136,17 @@ the route: see [Dropping a source you obtained yourself](#dropping-a-source-you-
 Answer it from the repo and only the repo:
 
 ```sh
-scripts/query.py --repo <repo> "<X>" [--top 15] [--json]
+scripts/query.py --repo <repo> "<X>" [--top 15] [--json] [--mermaid]
 ```
 
 It ranks every note against the query (titles and tags weigh most), groups
 the matches by type — claims (permanent), literature, sources on file with
 their verification state, maps of content — lists the open inquiries that
-touch the topic, adds the notes one link away, and names the gaps: terms the
-base never uses, matches with no distilled claim, notes no MOC reaches.
+touch the topic, adds the notes one link away, emits the typed edges between
+everything it named, and ranks the gaps: terms the base never uses, claims
+resting only on weak sources, questions asked and never worked, matches with
+no distilled claim, sources nobody read, claims nothing links to, notes no MOC
+reaches. `--mermaid` adds a diagram of that subgraph to the same report.
 
 Answer in chat from that report, citing note keys so the user can open them.
 Read the top notes if the report alone cannot settle the question. **Do not
@@ -152,12 +155,15 @@ and runs go through the lock and the gates. The script writes nothing, not
 even a log line.
 
 **End the answer with the gaps and an offer.** The report proposes one
-follow-up per gap (an inquiry for a topic the base lacks; INBOX entries for
-material never distilled or never mapped). List them and say that on the
-user's word you will file them. Never file unasked. When told to:
+follow-up per gap (an inquiry for research the base needs; INBOX entries for
+material never distilled, never read, never linked or never mapped), each with
+an id, listed in the order they should be worked. List them **with their ids**
+and say that on the user's word you will file them. Never file unasked. When
+told to:
 
 ```sh
-scripts/query.py --repo <repo> "<X>" --file-gaps
+scripts/query.py --repo <repo> "<X>" --file-gaps          # all of them
+scripts/query.py --repo <repo> "<X>" --file-gaps g1,g3    # the ones they chose
 ```
 
 That captures every suggestion through `capture.py` and rebuilds the manifest.
