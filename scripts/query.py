@@ -502,10 +502,16 @@ def query(repo: ContentRepo, text: str, top: int = 15, *, gap_cap: int = 0,
     # Not "no permanent note cites it": summarising a source in your own words
     # is a literature note's job under 1-1-1, and a claim can rest on a source
     # nobody has yet summarised.
+    # Typed edges only. A literature note that says "unlike [[other-source]]"
+    # has mentioned that source, not read it -- and since 1-1-1 gives a
+    # literature note exactly one reference, every OTHER reference it names in
+    # prose would otherwise be marked summarised by the note that dismissed it.
+    # This is the curated/prose distinction graph.py exists to keep.
     summarised = {str(n.meta.get("reference") or "") for n in by_key.values()
                   if n.type == "literature"}
     summarised |= {e.target for n in by_key.values() if n.type == "literature"
-                   for e in graph.out_edges(n, keys, id_to_key)}
+                   for e in graph.out_edges(n, keys, id_to_key)
+                   if e.relation != graph.MENTIONS}
     for row in matched:
         if row["type"] != "reference" or row["key"] in summarised:
             continue

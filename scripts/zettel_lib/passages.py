@@ -162,10 +162,15 @@ def reference_for_capture(repo: ContentRepo, path) -> tuple[str | None, list[str
     """The reference note whose capture this text belongs to.
 
     Both writers name a capture ``raw/<id>-<slug>.<ext>`` and put the extraction
-    beside it as ``raw/<id>-<slug>.txt``, so four rules in order cover every
-    shape one can take: the text IS the capture (a .txt drop), the text sits
-    beside it (the PDF case), the stems agree (.html and .md captures), or the
-    id prefix matches a reference whose raw_capture was never filled in.
+    beside it as ``raw/<id>-<slug>.txt``, so three rules in order cover every
+    shape one can take:
+
+    1. the text IS the capture -- a ``.txt`` drop, where ``raw_capture`` names
+       this exact path;
+    2. the stems agree -- the capture is a ``.pdf``/``.html``/``.md`` and the
+       extraction sits beside it under the same name;
+    3. the id prefix matches a reference whose ``raw_capture`` was never
+       filled in.
 
     Returns ``(key, warnings)``. No match is not an error -- the passage
     analysis is still worth reading -- but it does mean no literature command

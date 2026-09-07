@@ -95,9 +95,13 @@ class JsonResult:
     for books that plainly exist, and every ISBN-verified reference in a live
     repository was marked as having a rotted identifier on every run.
 
-    ``conclusive`` is true only for a 200 whose body parsed -- the server was
-    reached, understood, and its answer is the answer. A 404 is conclusive too
-    and arrives as ``(None, 404, True)``: "not found" IS an answer.
+    ``conclusive`` means the registry answered the question, whatever the
+    answer was: a 200 whose body parsed, or a 404/410 saying the identifier is
+    not there -- "not found" IS an answer, and it arrives as
+    ``(None, 404, True)``. It is FALSE when no answer was obtained: a 429 or
+    5xx that survived every retry, or a 200 whose body will not parse. So
+    ``conclusive`` does not imply ``data is not None``; a caller that needs a
+    payload must still check for one.
     """
 
     data: object | None

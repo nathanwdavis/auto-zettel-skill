@@ -379,6 +379,32 @@ def test_unsummarised_reference_is_a_source_nobody_read(clean_repo):
     assert "do not re-fetch" in suggestion["title"]
 
 
+def test_a_prose_mention_does_not_count_as_a_summary(clean_repo):
+    """1-1-1 gives a literature note exactly one reference, so every OTHER
+    source it names in prose is one it mentioned, not one it read. Counting
+    `mentions` as evidence let the note that dismissed a source suppress the
+    gap saying nobody had summarised it -- in a repo that passes every gate."""
+    result = run_script("capture.py", clean_repo, "reference", "Zettelkasten in practice",
+                        "--url", "https://example.org/zk", "--source-tier",
+                        "reputable-secondary", "--offline")
+    assert result.returncode == 0, result.stderr
+    unread = next(p.stem for p in (clean_repo / "reference").glob("zettelkasten-in-practice--*.md"))
+
+    lit = load(clean_repo, f"literature/{LIT_KEY}.md")
+    lit.body += f"\nUnlike [[{unread}]], which argues the opposite.\n"
+    lit.save()
+    run_script("build_manifest.py", clean_repo)
+    assert run_script("lint_links.py", clean_repo).returncode == 0, "the fixture must be legal"
+
+    gap = kinds(clean_repo, "zettelkasten")["unsummarised-reference"]
+    assert unread in gap["keys"]
+
+
+def test_a_literature_note_typed_link_does_count_as_a_summary(clean_repo):
+    """The other half: the fixture's own source IS summarised, so it is not a gap."""
+    assert "unsummarised-reference" not in kinds(clean_repo, "smart notes")
+
+
 def test_weak_sourcing_agrees_with_the_lint(clean_repo):
     """The gap and lint_citations' warning are one predicate, so they cannot
     disagree -- and the lint still exits 0, because this is advisory."""
