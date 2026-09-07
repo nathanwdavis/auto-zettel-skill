@@ -167,7 +167,7 @@ run `gh auth login`.
 ```sh
 # 1. Create the content repo. It asks for nothing it can infer, and refuses to
 #    clobber an existing repo or a non-empty directory.
-"$SCRIPTS/../scripts/init_content_repo.sh" --name my-kb --visibility private \
+"$SCRIPTS/init_content_repo.sh" --name my-kb --visibility private \
   --owner <your-github-username> --topics "retrieval practice, spaced repetition"
 
 # 2. Give it a source you already have. Anything in drop/ is ingested as

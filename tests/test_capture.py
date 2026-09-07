@@ -396,6 +396,23 @@ def test_moc_lists_its_notes_and_passes_every_gate(repo):
     assert_gates_pass(repo)
 
 
+def test_moc_puts_the_heading_first_and_the_lead_in_under_it(repo):
+    """templates/moc.md opens with the H1. A body above it would make the
+    document start with a sentence and then announce its own title."""
+    note = created(capture(repo, "moc", "Things", "--note", PERM_KEY,
+                           "--body", "How these relate."), repo)
+    body = note.body.strip().splitlines()
+    assert body[0] == "# Things"
+    assert "How these relate." in body
+    assert body.index("## Notes") > body.index("How these relate.")
+
+
+def test_moc_without_a_body_is_still_well_formed(repo):
+    note = created(capture(repo, "moc", "Things", "--note", PERM_KEY), repo)
+    lines = [l for l in note.body.strip().splitlines() if l]
+    assert lines[0] == "# Things" and lines[1] == "## Notes"
+
+
 def test_moc_accepts_a_bare_note_id(repo):
     note = created(capture(repo, "moc", "By id", "--note", PERM_KEY.rsplit("--", 1)[1]), repo)
     assert f"[[{PERM_KEY}]]" in note.body

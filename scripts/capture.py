@@ -348,9 +348,15 @@ def capture_moc(repo: ContentRepo, title: str, body: str, notes: list[str],
     meta = common_meta(title, "moc", allocate_id(repo))
     meta["tags"] = sorted(set(tags) | {"moc"})
     meta["links"] = []
-    lines = [f"# {title}", "", "## Notes", ""]
+    # Heading, then any lead-in, then the list -- the shape templates/moc.md
+    # describes and lint_layering walks. A body placed above the H1 would make
+    # the document open with a sentence and then announce its own title.
+    lines = [f"# {title}", ""]
+    if body:
+        lines += [body.rstrip(), ""]
+    lines += ["## Notes", ""]
     lines += [f"- [[{n.key}]] -- {n.title}" for n in listed]
-    text = (body + "\n\n" if body else "") + "\n".join(lines) + "\n"
+    text = "\n".join(lines) + "\n"
     path = repo.root / "moc" / f"{meta['key']}.md"
     _write(path, meta, text)
     return path
