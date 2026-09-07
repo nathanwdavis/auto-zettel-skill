@@ -185,3 +185,8 @@ how research starts; the warning is the reminder to finish grounding it.
 
 Never satisfy one of these by weakening the rule, deleting the note, or
 inventing a citation. Capture the source or drop the claim.
+
+---
+
+**Next:** [`quality-gates.md`](quality-gates.md) for the rest of the gates, or [`capture.md`](capture.md) for getting a source in.
+All reference docs: [`README.md`](README.md).

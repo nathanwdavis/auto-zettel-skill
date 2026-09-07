@@ -212,3 +212,8 @@ Only a provably stale lock (past `STALE_LOCK_HOURS`) is ever broken.
 Session work hands off through `remote_cycle.sh finish` like any cycle: a run
 branch, a PR, and the required check. There is no session path to `main`.
 See `references/capture.md`.
+
+---
+
+**Next:** [`scheduling.md`](scheduling.md) for the laptop paths, or [`two-mode-access.md`](two-mode-access.md) for reading without a clone.
+All reference docs: [`README.md`](README.md).

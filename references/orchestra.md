@@ -92,3 +92,8 @@ independently re-runs `build_manifest --check`, the three lints, and
 `check_skill_sandbox.py`, and pushes only when all pass (after a rejected
 push it re-pulls and re-runs everything but the sandbox check). A budget- or turn-cut run leaves
 its commits local and unpushed.
+
+---
+
+**Next:** [`scheduling.md`](scheduling.md) for how a run is triggered, or [`quality-gates.md`](quality-gates.md) for what decides its work may land.
+All reference docs: [`README.md`](README.md).

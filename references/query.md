@@ -286,3 +286,8 @@ one, degrade honestly:
   Mermaid source and the gap ids. The **one** exception is `stale-inquiry`,
   which is about how long a question has been open and therefore about now; its
   threshold and the measured age are both in the report so it explains itself.
+
+---
+
+**Next:** [`capture.md`](capture.md) for acting on a gap, or [`note-types.md`](note-types.md) for what the report is describing.
+All reference docs: [`README.md`](README.md).

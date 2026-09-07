@@ -98,3 +98,8 @@ environments cache `ci/setup-environment.sh` per environment. An existing
 content repo picks up the two new gate steps only when the workflow file is
 re-copied (and `ZETTEL_SKILL_REF`, if pinned, is bumped). Until then the
 Mode-A wrapper still enforces everything locally; only the CI half is stale.
+
+---
+
+**Next:** [`orchestra.md`](orchestra.md) for the skill-smith's place in the cycle, or [`architecture.md`](architecture.md) for why the skill layer rolls back and knowledge never does.
+All reference docs: [`README.md`](README.md).

@@ -85,3 +85,8 @@ look and bad at knowing whether they mean anything.
 - **Idempotent.** Re-running never duplicates a proposal for a pair already in
   the queue.
 - **Deterministic.** Same notes in, same communities and scores out.
+
+---
+
+**Next:** [`orchestra.md`](orchestra.md) for the connector and critic that act on proposals, or [`note-types.md`](note-types.md) for the relations they may use.
+All reference docs: [`README.md`](README.md).

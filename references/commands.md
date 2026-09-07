@@ -503,3 +503,7 @@ options:
                         None)
 ```
 
+---
+
+**Next:** [`../README.md`](../README.md) for the task-shaped view, or [`tutorial.md`](tutorial.md) to see them in sequence.
+All reference docs: [`README.md`](README.md).

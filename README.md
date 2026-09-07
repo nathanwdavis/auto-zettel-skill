@@ -436,8 +436,9 @@ creation — rewording a note's `title` never moves the file or breaks a link.
 
 ## Reference
 
-Twelve documents, read on demand. Start with the first three if you want to
-understand the system rather than operate it.
+Fourteen documents, read on demand, indexed at
+[`references/README.md`](references/README.md). Start with the first three if
+you want to understand the system rather than operate it.
 
 **Understand it**
 

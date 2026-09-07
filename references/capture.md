@@ -300,3 +300,8 @@ cap written to `config.yml` at genesis (default 40).
 - `references/remote-execution.md` — the lock, the run branch, CI as the gate
 - `references/two-mode-access.md` — Mode B has no local clone, so it routes
   write intentions through `INBOX.md` rather than capturing directly
+
+---
+
+**Next:** [`note-types.md`](note-types.md) for what each generator writes, or [`query.md`](query.md) for finding out what you already have.
+All reference docs: [`README.md`](README.md).
