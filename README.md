@@ -23,29 +23,73 @@ a public skill repo is what lets cloud environments install it with no token.
 
 ### Prerequisites
 
-- [`gh` CLI](https://cli.github.com), authenticated: `gh auth login`
-  (needs a PAT or SSH key with `repo` scope to create the content repo)
-- Python 3.11+
+- **`git`**, and a **GitHub account** — you will end up with *two* repositories:
+  this plugin, and a separate content repo for your notes.
+- **[`gh` CLI](https://cli.github.com), authenticated**: `gh auth login`
+  (needs a PAT or SSH key with `repo` scope to create the content repo).
+- **Python 3.11+**.
+- **The `claude` CLI on your `PATH`** — scheduled maintenance runs invoke it.
 
-### As a plugin
+### Route 1 — as a plugin
 
 ```sh
 /plugin marketplace add nathanwdavis/auto-zettel-skill
 /plugin install zettel-bootstrap@auto-zettel-skill
 ```
 
-### Or as a plain skill
+This installs all four skills, so `/zettel-bootstrap:zettel-ask` and its
+siblings work immediately.
+
+**Where the scripts land.** The plugin is installed under Claude's plugin
+directory, not your working directory, so `scripts/capture.py` on its own will
+not resolve. Inside a Claude session the plugin root is `$CLAUDE_PLUGIN_ROOT`;
+set `SCRIPTS` once and every command in this README works:
 
 ```sh
-git clone git@github.com:nathanwdavis/auto-zettel-skill.git
-ln -s "$PWD/auto-zettel-skill/skills/zettel-bootstrap" ~/.claude/skills/zettel-bootstrap
+SCRIPTS="$CLAUDE_PLUGIN_ROOT/scripts"
+"$SCRIPTS/query.py" --repo <content-repo> "atomic notes"
 ```
+
+`$CLAUDE_PLUGIN_ROOT` is set inside a Claude session and is the supported way
+to find the plugin; where it unpacks on disk is an implementation detail that
+can change between versions, so do not hardcode a path. **If you want to run
+these scripts from your own terminal — or schedule them — use route 2**, which
+gives you a directory you own.
+
+### Route 2 — as plain skills, from a clone
+
+Gives you a directory you own, which is the easier route if you intend to run
+the scripts directly or schedule them. Link **every** skill and **every** agent —
+linking only the router leaves you without the `/zettel-ask`, `/zettel-query`
+and `/zettel-ingest` commands, and without the eight subagents a maintenance
+run delegates to:
+
+```sh
+git clone https://github.com/nathanwdavis/auto-zettel-skill.git
+cd auto-zettel-skill
+
+mkdir -p ~/.claude/skills ~/.claude/agents
+for skill in skills/*/;   do ln -sfn "$PWD/${skill%/}" ~/.claude/skills/$(basename "${skill%/}"); done
+for agent in agents/*.md; do ln -sfn "$PWD/$agent"     ~/.claude/agents/$(basename "$agent");     done
+```
+
+Slash commands are then bare — `/zettel-query` — rather than namespaced.
+`SCRIPTS` is just `$PWD/scripts`.
+
+(This is the same loop [`ci/setup-environment.sh`](ci/setup-environment.sh) runs
+for cloud environments, so a later sub-skill is picked up without editing it.)
 
 ### Python dependencies
 
 ```sh
 pip install -r requirements.txt
 ```
+
+**Install these into the interpreter that will actually run the scripts.** If
+you use a virtualenv and later schedule a maintenance run under `cron` or
+`launchd`, that scheduler must invoke the same interpreter — set `PYTHON` to an
+absolute path in the job, or the run fails several steps in with a missing
+module.
 
 This pulls `pypandoc-binary`, which ships its own pandoc build — no system
 pandoc install needed. `requirements-optional.txt` adds
