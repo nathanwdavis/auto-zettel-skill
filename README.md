@@ -485,19 +485,20 @@ implementation forced a change. Code comments cite it by number.
 
 ## Working on the skill itself
 
-These commands are for contributors working from a clone of this repository;
-run them from the plugin root, not from your content repo:
-
 [`.claude/CLAUDE.md`](.claude/CLAUDE.md) has the conventions, the environment's
 sharp edges, and the one invariant that governs every change. [`PLAN.md`](PLAN.md)
 tracks phase status.
+
+Unlike everything above, these two are run by contributors from a clone of *this*
+repository — from the plugin root, not from your content repo, and not through
+`$SCRIPTS`:
 
 ```sh
 pip install -r requirements-dev.txt
 ./smoke_test.sh          # the acceptance checklist, executable; exit 0 or it is not done
 ```
 
-`smoke_test.sh` runs the full suite (630 tests) plus an end-to-end genesis
+`smoke_test.sh` runs the full suite (632 tests) plus an end-to-end genesis
 scaffold. To run pytest alone use the virtualenv's interpreter — `pytest` is
 generally not in the system python. Three acceptance checks need a networked
 machine and are manual: `gh repo create`, live metadata lookups, and live
