@@ -485,6 +485,9 @@ implementation forced a change. Code comments cite it by number.
 
 ## Working on the skill itself
 
+These commands are for contributors working from a clone of this repository;
+run them from the plugin root, not from your content repo:
+
 [`.claude/CLAUDE.md`](.claude/CLAUDE.md) has the conventions, the environment's
 sharp edges, and the one invariant that governs every change. [`PLAN.md`](PLAN.md)
 tracks phase status.
