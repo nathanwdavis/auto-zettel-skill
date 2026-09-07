@@ -41,7 +41,13 @@ OPENALEX = "https://api.openalex.org/works/https://doi.org/{doi}?mailto={mailto}
 ARXIV = "https://export.arxiv.org/api/query?id_list={arxiv_id}"
 PUBMED = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
           "?db=pubmed&retmode=json&id={pmid}")
-OPENLIBRARY = "https://openlibrary.org/api/books?bibkeys=ISBN:{isbn}&format=json&jscmd=data"
+# `/api/books?jscmd=data` was the endpoint here until it began answering
+# `200 {}` for books that are plainly on Open Library -- `search.json` returns
+# numFound 1 for the same ISBNs. That silent change marked every ISBN-verified
+# reference in a live repository as rotted, on every run, for four cycles.
+# search.json also answers definitively: numFound 0 means "not in the index",
+# which is a fact, where an empty body is only an absence of one.
+OPENLIBRARY = "https://openlibrary.org/search.json?isbn={isbn}"
 GOOGLEBOOKS = "https://www.googleapis.com/books/v1/volumes?q=isbn:{isbn}"
 
 
@@ -49,50 +55,85 @@ def now() -> str:
     return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _identifier_lookup(csl: dict, *, mailto: str, transport) -> tuple[str, str] | None:
+@dataclass(frozen=True)
+class Lookup:
+    """What the registries said about a note's identifiers.
+
+    Three outcomes, not two, and the third is the whole point. ``method`` set
+    is a hit. ``method`` empty with ``conclusive`` true is a registry saying
+    "no such identifier" -- real rot, and it must stay visible. ``method``
+    empty with ``conclusive`` FALSE is a registry that could not be read, which
+    is not evidence of anything and must never overwrite a finding that was
+    established when the registry could.
+    """
+
+    method: str = ""
+    source: str = ""
+    saw_identifier: bool = False
+    conclusive: bool = True
+
+
+def _identifier_lookup(csl: dict, *, mailto: str, transport) -> Lookup:
     """Try the authoritative registries for any identifier ``csl`` carries.
 
-    Returns ``(method, source)`` on a confirmed hit, ``("", "")`` when
-    identifiers exist but none confirmed, or ``None`` when there is nothing
-    to look up. NetworkUnavailable propagates so callers can degrade (NFR-5).
+    A registry that fails to answer makes the WHOLE lookup inconclusive, even
+    if a later one answers negatively: on partial information the safe move is
+    to change nothing. NetworkUnavailable propagates so callers degrade (NFR-5).
     """
     saw_identifier = False
+    unanswered = False
+
+    def answered(result: http.JsonResult) -> object | None:
+        nonlocal unanswered
+        if not result.conclusive:
+            unanswered = True
+        return result.data
 
     doi = str(csl.get("DOI") or "").strip()
     if doi:
         saw_identifier = True
         url = CROSSREF.format(doi=quote(doi, safe="/"), mailto=quote(mailto))
-        data = http.get_json(url, transport=transport)
+        data = answered(http.get_json_result(url, transport=transport))
         if data and (data.get("message") or {}).get("DOI"):
-            return "crossref", f"https://doi.org/{doi}"
+            return Lookup("crossref", f"https://doi.org/{doi}", True)
 
     arxiv_id = citations.arxiv_id(csl)
     if arxiv_id:
         saw_identifier = True
         url = ARXIV.format(arxiv_id=quote(arxiv_id))
         resp = _raw(url, transport)
-        if resp and "<entry>" in resp and "<title>" in resp:
-            return "arxiv", f"https://arxiv.org/abs/{arxiv_id}"
+        if resp is None:
+            unanswered = True
+        elif "<entry>" in resp and "<title>" in resp:
+            return Lookup("arxiv", f"https://arxiv.org/abs/{arxiv_id}", True)
 
     pmid = str(csl.get("PMID") or "").strip()
     if pmid:
         saw_identifier = True
-        data = http.get_json(PUBMED.format(pmid=quote(pmid)), transport=transport)
-        result = (data or {}).get("result") or {}
-        if pmid in result:
-            return "pubmed", f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+        data = answered(http.get_json_result(PUBMED.format(pmid=quote(pmid)),
+                                             transport=transport))
+        if pmid in ((data or {}).get("result") or {}):
+            return Lookup("pubmed", f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/", True)
 
     isbn = str(csl.get("ISBN") or "").replace("-", "").strip()
     if isbn:
         saw_identifier = True
-        data = http.get_json(OPENLIBRARY.format(isbn=quote(isbn)), transport=transport)
-        if data and f"ISBN:{isbn}" in data:
-            return "openlibrary", f"https://openlibrary.org/isbn/{isbn}"
-        data = http.get_json(GOOGLEBOOKS.format(isbn=quote(isbn)), transport=transport)
+        data = answered(http.get_json_result(OPENLIBRARY.format(isbn=quote(isbn)),
+                                             transport=transport))
+        # An answer without numFound is not a negative one -- it is the shape
+        # the endpoint stopped returning, and the reason this is a tristate.
+        found = (data or {}).get("numFound")
+        if found is None:
+            unanswered = True
+        elif int(found) > 0:
+            return Lookup("openlibrary", f"https://openlibrary.org/isbn/{isbn}", True)
+        data = answered(http.get_json_result(GOOGLEBOOKS.format(isbn=quote(isbn)),
+                                             transport=transport))
         if data and int(data.get("totalItems") or 0) > 0:
-            return "googlebooks", f"https://www.googleapis.com/books/v1/volumes?q=isbn:{isbn}"
+            return Lookup("googlebooks",
+                          f"https://www.googleapis.com/books/v1/volumes?q=isbn:{isbn}", True)
 
-    return ("", "") if saw_identifier else None
+    return Lookup("", "", saw_identifier, conclusive=not unanswered)
 
 
 def _open_access_lookup(doi: str, *, mailto: str, transport) -> str:
@@ -153,6 +194,22 @@ def verify_note(
     csl = note.meta.get("csl_json") or {}
     if not isinstance(csl, dict):
         csl = {}
+    prior = note.meta.get("verification") or {}
+    if not isinstance(prior, dict):
+        prior = {}
+
+    def keep_prior() -> Verification:
+        """The finding already on file, when this run learned nothing better.
+
+        A record says an identifier resolved at a named registry on a named
+        date. A registry that cannot be read today does not refute that, and
+        replacing it with a weaker record destroys evidence -- unattended, on a
+        schedule, in a repository whose whole point is that claims are
+        traceable.
+        """
+        return Verification(True, str(prior.get("method") or "raw-capture"),
+                            str(prior.get("source") or capture),
+                            str(prior.get("identifier_check") or ""))
 
     capture_ok = False
     if capture:
@@ -161,13 +218,20 @@ def verify_note(
 
     if capture_ok:
         if offline:
+            # Offline says nothing about identifiers either way, so whatever
+            # was established when the network was up still stands.
+            return keep_prior()
+        found = _identifier_lookup(csl, mailto=mailto, transport=transport)
+        if not found.saw_identifier:
             return Verification(True, "raw-capture", capture)
-        hit = _identifier_lookup(csl, mailto=mailto, transport=transport)
-        if hit is None:
-            return Verification(True, "raw-capture", capture)
-        method, source = hit
-        if method:
-            return Verification(True, f"raw-capture+{method}", source, "confirmed")
+        if found.method:
+            return Verification(True, f"raw-capture+{found.method}", found.source,
+                                "confirmed")
+        if not found.conclusive:
+            return keep_prior()
+        # A registry actually said "no such identifier": that is rot, and it
+        # must be visible. The capture is still the documented either/or basis,
+        # so verification itself holds.
         return Verification(True, "raw-capture", capture, "failed")
 
     if offline:
@@ -185,9 +249,15 @@ def verify_note(
             # block a Crossref check that still works. A dead network still
             # surfaces below, from the identifier lookup itself.
             open_access = ""
-    hit = _identifier_lookup(csl, mailto=mailto, transport=transport)
-    if hit and hit[0]:
-        return Verification(True, hit[0], hit[1], "", open_access)
+    found = _identifier_lookup(csl, mailto=mailto, transport=transport)
+    if found.method:
+        return Verification(True, found.method, found.source, "", open_access)
+    if not found.conclusive and prior.get("verified") is True:
+        # Same rule with no capture to fall back on: an unreadable registry is
+        # not grounds for un-verifying a note that was verified before.
+        return Verification(True, str(prior.get("method") or ""),
+                            str(prior.get("source") or ""),
+                            str(prior.get("identifier_check") or ""), open_access)
     return Verification(False, "", "", "", open_access)
 
 
@@ -250,11 +320,16 @@ def run(repo: ContentRepo, *, offline: bool, mailto: str, transport=http.request
                                         result.source, result.identifier_check)
 
         old = dict(note.meta.get("verification") or {})
-        new = {
+        # Built FROM the old block, not in place of it. Assigning a freshly
+        # built dict dropped every key this run did not happen to produce --
+        # one offline run stripped identifier_check from 22 reference notes in
+        # a live repository and the cycle committed it before anyone noticed.
+        new = dict(old)
+        new.update({
             "method": method,
             "source": source,
             "verified": bool(ok),
-        }
+        })
         if id_check:
             new["identifier_check"] = id_check
         # An open-access URL found earlier stays recorded until a capture
@@ -274,6 +349,9 @@ def run(repo: ContentRepo, *, offline: bool, mailto: str, transport=http.request
             new["date"] = now() if ok else ""
         else:
             new["date"] = old.get("date", "")
+        # `date` records when THIS state was established. A re-check that found
+        # the same state keeps it, so `updated` keeps meaning "last authored
+        # edit" (issue #7).
         note.meta["verification"] = new
 
         rendered_changed = rerender(note) if render else False

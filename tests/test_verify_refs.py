@@ -20,11 +20,19 @@ CROSSREF_OK = http.Response(
 CROSSREF_MISS = http.Response(404, json.dumps({"status": "error"}), {})
 CROSSREF_RATE_LIMITED = http.Response(429, "", {"Retry-After": "0"})
 
+# openlibrary.org/search.json?isbn=... -- `numFound` is the answer. The old
+# /api/books?jscmd=data endpoint is gone from the code because it began
+# returning OPENLIBRARY_EMPTY_200 for books that exist.
 OPENLIBRARY_OK = http.Response(
-    200, json.dumps({"ISBN:9781542866507": {
-        "title": "How to Take Smart Notes",
-        "authors": [{"name": "Sönke Ahrens"}]}}), {})
-OPENLIBRARY_MISS = http.Response(200, json.dumps({}), {})
+    200, json.dumps({"numFound": 1, "docs": [{"title": "How to Take Smart Notes",
+                                              "author_name": ["Sönke Ahrens"]}]}), {})
+OPENLIBRARY_MISS = http.Response(200, json.dumps({"numFound": 0, "docs": []}), {})
+#: The live defect, kept as a fixture: a 200 whose body answers nothing. It is
+#: NOT a miss, and a run that reads it as one destroys evidence.
+OPENLIBRARY_EMPTY_200 = http.Response(200, json.dumps({}), {})
+#: A 200 that is not JSON at all -- a proxy or maintenance page. Inconclusive,
+#: and unlike a 5xx it costs no retry backoff, so tests can use it freely.
+OPENLIBRARY_UNREADABLE = http.Response(200, "<html>maintenance</html>", {})
 GOOGLEBOOKS_OK = http.Response(
     200, json.dumps({"totalItems": 1, "items": [{"id": "abc"}]}), {})
 GOOGLEBOOKS_MISS = http.Response(200, json.dumps({"totalItems": 0}), {})
@@ -207,6 +215,132 @@ def test_offline_capture_never_attempts_a_lookup(clean_repo):
     v = verify_refs.verify_note(
         note, repo_of(clean_repo), offline=True, mailto="", transport=transport)
     assert (v.verified, v.method, v.identifier_check) == (True, "raw-capture", "")
+
+
+# --- an inconclusive re-check never downgrades a record (amendment A14) -------
+
+def with_confirmed_record(repo, doi="10.1145/3477132.3483540"):
+    """The fixture reference, already verified against a registry."""
+    note = load(repo, f"reference/{REF_KEY}.md")
+    note.meta["csl_json"]["DOI"] = doi
+    note.meta["verification"] = {
+        "method": "raw-capture+crossref", "source": f"https://doi.org/{doi}",
+        "verified": True, "date": "2026-08-30T10:00:00Z",
+        "identifier_check": "confirmed"}
+    note.save()
+    return load(repo, f"reference/{REF_KEY}.md")
+
+
+def test_an_empty_200_is_not_a_miss(clean_repo):
+    """The live defect: Open Library answered 200 {} for books that exist, and
+    four cycles of notes were marked rotted because of it."""
+    note = with_confirmed_record(clean_repo, doi="")
+    note.meta["csl_json"].pop("DOI", None)
+    note.save()
+    note = load(clean_repo, f"reference/{REF_KEY}.md")
+    v = verify_refs.verify_note(
+        note, repo_of(clean_repo), offline=False, mailto="me@example.org",
+        transport=cassette(**{"openlibrary.org": OPENLIBRARY_EMPTY_200,
+                              "googleapis.com": GOOGLEBOOKS_MISS}))
+    assert v.identifier_check == "confirmed", "an unreadable answer is not a negative one"
+    assert v.method == "raw-capture+crossref"
+
+
+def test_a_registry_that_cannot_be_read_keeps_the_confirmed_record(clean_repo):
+    """Every registry answering with something unreadable: the run learned
+    nothing, so it must change nothing."""
+    note = with_confirmed_record(clean_repo)
+    unreadable = http.Response(200, "<html>maintenance</html>", {})
+    v = verify_refs.verify_note(
+        note, repo_of(clean_repo), offline=False, mailto="me@example.org",
+        transport=cassette(**{"api.crossref.org": unreadable,
+                              "openlibrary.org": unreadable,
+                              "googleapis.com": unreadable}))
+    assert (v.verified, v.method, v.identifier_check) == (
+        True, "raw-capture+crossref", "confirmed")
+
+
+def test_a_definitive_miss_still_flags_rot(clean_repo):
+    """The gate is not weakened: a registry saying "no such identifier" is an
+    answer, and it must still be visible."""
+    note = with_confirmed_record(clean_repo, doi="10.9999/rotted")
+    v = verify_refs.verify_note(
+        note, repo_of(clean_repo), offline=False, mailto="me@example.org",
+        transport=cassette(**{"api.crossref.org": CROSSREF_MISS,
+                              "openlibrary.org": OPENLIBRARY_MISS,
+                              "googleapis.com": GOOGLEBOOKS_MISS}))
+    assert (v.verified, v.method, v.identifier_check) == (True, "raw-capture", "failed")
+
+
+def test_offline_never_strips_identifier_check(clean_repo):
+    """One offline run removed identifier_check from 22 notes in a live repo."""
+    note = with_confirmed_record(clean_repo)
+    v = verify_refs.verify_note(
+        note, repo_of(clean_repo), offline=True, mailto="", transport=cassette())
+    assert v.identifier_check == "confirmed"
+    assert v.method == "raw-capture+crossref"
+
+
+def test_an_offline_run_over_confirmed_notes_writes_nothing(clean_repo):
+    """The property that matters in the field: a degraded cycle leaves the
+    committed records exactly as it found them."""
+    with_confirmed_record(clean_repo)
+    before = (clean_repo / "reference" / f"{REF_KEY}.md").read_bytes()
+    verify_refs.run(repo_of(clean_repo), offline=True, mailto="", render=False)
+    assert (clean_repo / "reference" / f"{REF_KEY}.md").read_bytes() == before
+
+
+def test_a_dead_network_run_over_confirmed_notes_writes_nothing(clean_repo):
+    with_confirmed_record(clean_repo)
+    before = (clean_repo / "reference" / f"{REF_KEY}.md").read_bytes()
+    verify_refs.run(repo_of(clean_repo), offline=False, mailto="me@example.org",
+                    transport=cassette(), render=False)
+    assert (clean_repo / "reference" / f"{REF_KEY}.md").read_bytes() == before
+
+
+def test_a_5xx_that_survives_every_retry_is_inconclusive():
+    """Tested here rather than through verify_note: the retry backoff really
+    sleeps, and this is the one place a fake clock can be injected."""
+    slept: list[float] = []
+    result = http.get_json_result(
+        "https://openlibrary.org/search.json?isbn=1",
+        transport=lambda url, headers: http.Response(503, "", {"Retry-After": "0"}),
+        sleep=slept.append)
+    assert (result.data, result.conclusive) == (None, False)
+    assert len(slept) == http.MAX_RETRIES - 1
+
+
+def test_a_404_is_a_conclusive_answer():
+    """"Not found" IS an answer, and rot has to stay visible."""
+    result = http.get_json_result(
+        "https://api.crossref.org/works/x",
+        transport=lambda url, headers: http.Response(404, "", {}))
+    assert (result.data, result.conclusive) == (None, True)
+
+
+def test_isbn_verifies_through_search_json(clean_repo):
+    note = set_csl(clean_repo)
+    transport = cassette(**{"openlibrary.org": OPENLIBRARY_OK})
+    v = verify_refs.verify_note(
+        note, repo_of(clean_repo), offline=False, mailto="me@example.org",
+        transport=transport)
+    assert (v.verified, v.method) == (True, "openlibrary")
+    assert any("search.json" in url for url in transport.calls), transport.calls
+
+
+def test_a_partly_unreadable_lookup_is_inconclusive_overall(clean_repo):
+    """Open Library unreachable and Google Books saying no is not a verdict:
+    on partial information, change nothing."""
+    note = with_confirmed_record(clean_repo, doi="")
+    note.meta["csl_json"].pop("DOI", None)
+    note.meta["verification"]["method"] = "raw-capture+openlibrary"
+    note.save()
+    note = load(clean_repo, f"reference/{REF_KEY}.md")
+    v = verify_refs.verify_note(
+        note, repo_of(clean_repo), offline=False, mailto="me@example.org",
+        transport=cassette(**{"openlibrary.org": OPENLIBRARY_UNREADABLE,
+                              "googleapis.com": GOOGLEBOOKS_MISS}))
+    assert v.identifier_check == "confirmed"
 
 
 # --- open access (A11) ---------------------------------------------------------
