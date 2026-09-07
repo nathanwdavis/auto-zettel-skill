@@ -17,7 +17,8 @@ from pathlib import Path
 import pytest
 
 import capture as capture_mod
-from conftest import PERM_KEY, REF_KEY, SCRIPTS, build_clean_repo, rules, run_script
+from conftest import (LIT_KEY, MOC_KEY, PERM_KEY, REF_KEY, SCRIPTS, build_clean_repo,
+                      rules, run_script)
 from zettel_lib import http, naming
 from zettel_lib.frontmatter import Note
 from zettel_lib.repo import ContentRepo
@@ -359,12 +360,62 @@ def test_permanent_warns_on_a_sourced_claim_without_a_verified_reference(repo):
     assert run_script("lint_citations.py", repo).returncode == 1
 
 
+def test_moc_lists_its_notes_and_passes_every_gate(repo):
+    note = created(capture(repo, "moc", "Note-taking systems",
+                           "--note", PERM_KEY, "--note", LIT_KEY), repo)
+    assert note.type == "moc" and "moc" in note.tags
+    assert f"[[{PERM_KEY}]]" in note.body and f"[[{LIT_KEY}]]" in note.body
+    assert_gates_pass(repo)
+
+
+def test_moc_accepts_a_bare_note_id(repo):
+    note = created(capture(repo, "moc", "By id", "--note", PERM_KEY.rsplit("--", 1)[1]), repo)
+    assert f"[[{PERM_KEY}]]" in note.body
+
+
+def test_moc_refuses_to_write_an_empty_map(repo):
+    """lint_links fails an empty MOC as moc-empty; refuse it at write time."""
+    result = capture(repo, "moc", "Empty")
+    assert result.returncode == 2 and "moc-empty" in result.stderr
+
+
+def test_moc_refuses_an_unresolvable_note(repo):
+    result = capture(repo, "moc", "X", "--note", "missing--209901010101")
+    assert result.returncode == 2 and "resolves to no note" in result.stderr
+
+
+def test_moc_refuses_to_list_another_moc(repo):
+    """INDEX links to MOCs and MOCs link to notes; a MOC of MOCs is a third
+    layer the FR-4 rule does not have."""
+    result = capture(repo, "moc", "Meta", "--note", MOC_KEY)
+    assert result.returncode == 2 and "layering" in result.stderr
+
+
+def test_a_generated_moc_closes_the_unmapped_gap(repo):
+    """The reason this generator exists: the first knowledge pass ends by
+    mapping the notes, and that step used to require hand-writing a file."""
+    import json
+    fresh = created(capture(repo, "permanent", "Serendipity rewards a dense graph",
+                            "--link", f"{PERM_KEY}:elaborates"), repo)
+
+    def unmapped(query: str) -> list[str]:
+        data = json.loads(run_script("query.py", repo, query, "--json").stdout)
+        return [k for d in data["gap_details"] if d["kind"] == "unmapped" for k in d["keys"]]
+
+    assert fresh.key in unmapped("serendipity dense graph")
+    capture(repo, "moc", "Serendipity", "--note", fresh.key)
+    assert fresh.key not in unmapped("serendipity dense graph")
+    assert_gates_pass(repo)
+
+
 def test_generators_leave_the_manifest_current(repo):
     capture(repo, "reference", "Fresh", "--author", "A, B", "--year", "2026", "--offline")
     assert run_script("build_manifest.py", repo, "--check").returncode == 0
     capture(repo, "literature", "Fresh lit", "--reference", REF_KEY, "--locator", "p. 9")
     assert run_script("build_manifest.py", repo, "--check").returncode == 0
     capture(repo, "permanent", "Fresh claim", "--link", f"{PERM_KEY}:analogous")
+    assert run_script("build_manifest.py", repo, "--check").returncode == 0
+    capture(repo, "moc", "Fresh map", "--note", PERM_KEY)
     assert run_script("build_manifest.py", repo, "--check").returncode == 0
 
 

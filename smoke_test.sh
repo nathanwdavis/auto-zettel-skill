@@ -355,15 +355,22 @@ CAPPY
 "$PY" scripts/verify_refs.py --repo "$KB" --offline >/dev/null || fail "verify_refs after capture"
 GLIT="$("$PY" scripts/capture.py --repo "$KB" literature "Sam on generation" \
   --reference "$GREFKEY" --locator "p. 1")" || fail "capture.py literature"
-"$PY" scripts/capture.py --repo "$KB" permanent "Generated notes pass the gates" \
-  --link "$(basename "$GLIT" .md):elaborates" >/dev/null || fail "capture.py permanent"
+GPERM="$("$PY" scripts/capture.py --repo "$KB" permanent "Generated notes pass the gates" \
+  --link "$(basename "$GLIT" .md):elaborates")" || fail "capture.py permanent"
+# A map of content is the last step of a first knowledge pass, and the one that
+# used to require hand-writing a note file.
+"$PY" scripts/capture.py --repo "$KB" moc "Generated notes" \
+  --note "$(basename "$GPERM" .md)" >/dev/null || fail "capture.py moc"
+MOC_ERR="$("$PY" scripts/capture.py --repo "$KB" moc "Empty map" 2>&1 || true)"
+echo "$MOC_ERR" | grep -q "moc-empty" \
+  || fail "capture.py moc must refuse an empty map (got: $MOC_ERR)"
 for g in build_manifest.py lint_citations.py lint_links.py; do
   args=(); [[ "$g" == build_manifest.py ]] && args=(--check)
   # ${a[@]+"${a[@]}"}, not "${a[@]}": under `set -u` bash 3.2 -- still the
   # system bash on macOS -- treats an empty array expansion as unbound.
   "$PY" "scripts/$g" --repo "$KB" ${args[@]+"${args[@]}"} >/dev/null || fail "$g after the generators"
 done
-pass "generated reference, literature, and permanent notes pass every gate"
+pass "generated reference, literature, permanent and moc notes pass every gate"
 
 # A12: the inquiry updater enforces AC-6 before it writes anything.
 UINQ="$(basename "$(ls "$KB"/inquiries/*.md | head -1)" .md)"
