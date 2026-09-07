@@ -342,10 +342,8 @@ def test_unknown_gap_id_is_a_usage_error_and_writes_nothing(clean_repo):
 def test_a_query_shaped_gap_selection_is_refused_and_writes_nothing(clean_repo):
     """`--file-gaps <query>` swallows the query as the selection value.
 
-    It must never be mistaken for a real selection. (While `query` is a
-    required positional argparse catches it first; once --from-file makes the
-    positional optional, query.py's own validator reports it -- asserted in
-    test_a_query_shaped_gap_selection_names_the_fix.)
+    It must never be mistaken for a real selection; the message that names the
+    fix is asserted in test_a_query_shaped_gap_selection_names_the_fix.
     """
     before = tree_hash(clean_repo)
     result = run_script("query.py", clean_repo, "--file-gaps", "atomic notes")
@@ -484,6 +482,159 @@ def test_raw_mentions_are_deterministic(clean_repo):
     a = report(clean_repo, "serendipity", "--include-raw", "--json").stdout
     b = report(clean_repo, "serendipity", "--include-raw", "--json").stdout
     assert a == b
+
+
+# -- passage mode (Phase 3) ---------------------------------------------------
+
+def extraction(repo):
+    return next((repo / "raw").glob("*a-passage-paper.txt"))
+
+
+def test_passage_mode_carries_page_locators_into_the_command(capture_repo):
+    out = report(capture_repo, "--from-file", str(extraction(capture_repo))).stdout
+    assert "--locator 'p. 2'" in out or "--locator 'p. 3'" in out
+    assert "capture.py" in out and "literature" in out
+
+
+def test_passage_mode_names_the_reference_that_owns_the_capture(capture_repo):
+    data = json.loads(report(capture_repo, "--from-file", str(extraction(capture_repo)),
+                             "--json").stdout)
+    assert data["mode"] == "passage"
+    assert data["reference"].startswith("a-passage-paper--")
+    for chunk in data["chunks"]:
+        if chunk["command"]:
+            assert f"--reference {data['reference']}" in chunk["command"]
+
+
+def test_passage_mode_separates_covered_material_from_candidates(capture_repo):
+    """Page 1 restates the fixture's own claim; pages 2 and 3 do not."""
+    data = json.loads(report(capture_repo, "--from-file", str(extraction(capture_repo)),
+                             "--json").stdout)
+    by_page = {c["page"]: c["verdict"] for c in data["chunks"]}
+    assert by_page[1] in (passages_same(), "touches"), by_page
+    assert by_page[2] == "none", "a steak recipe is not in this knowledge base"
+    assert data["candidates"], "the unrelated pages are candidate claims"
+
+
+def passages_same():
+    return "same-claim"
+
+
+def test_passage_mode_offers_no_command_for_covered_material(capture_repo):
+    data = json.loads(report(capture_repo, "--from-file", str(extraction(capture_repo)),
+                             "--json").stdout)
+    for chunk in data["chunks"]:
+        if chunk["verdict"] != "none":
+            assert chunk["command"] == "", "offering a command here invites a duplicate"
+
+
+def test_passage_mode_refuses_to_invent_a_reference(orphan_capture_repo):
+    """A literature note must name a real reference, and a command carrying a
+    placeholder is one that gets improvised around."""
+    path = orphan_capture_repo / "raw" / "202608309999-unclaimed.txt"
+    data = json.loads(report(orphan_capture_repo, "--from-file", str(path), "--json").stdout)
+    assert data["reference"] is None
+    assert all(c["command"] == "" for c in data["chunks"])
+    assert any("no reference note names" in w for w in data["warnings"])
+    assert data["chunks"], "the analysis is still worth reading without a reference"
+
+
+def test_passage_mode_writes_nothing(capture_repo):
+    before = tree_hash(capture_repo)
+    report(capture_repo, "--from-file", str(extraction(capture_repo)))
+    report(capture_repo, "--from-file", str(extraction(capture_repo)), "--json")
+    assert tree_hash(capture_repo) == before
+
+
+def test_passage_mode_reports_what_it_set_aside(capture_repo):
+    """Silently dropped material is how a report starts lying to its reader."""
+    data = json.loads(report(capture_repo, "--from-file", str(extraction(capture_repo)),
+                             "--json").stdout)
+    assert data["skipped"]["preamble"] == 1
+    assert set(data["skipped"]) == {"short", "preamble"}
+
+
+def test_passage_mode_commands_are_shell_safe(capture_repo):
+    import shlex
+    data = json.loads(report(capture_repo, "--from-file", str(extraction(capture_repo)),
+                             "--json").stdout)
+    for chunk in data["chunks"]:
+        if chunk["command"]:
+            argv = shlex.split(chunk["command"])
+            assert str(capture_repo) in argv and "literature" in argv
+
+
+def test_passage_mode_bands_come_from_config(capture_repo):
+    cfg = (capture_repo / "config.yml").read_text(encoding="utf-8")
+    (capture_repo / "config.yml").write_text(
+        cfg + "\nquery:\n  same_claim: 0.9\n  touches: 0.5\n", encoding="utf-8")
+    data = json.loads(report(capture_repo, "--from-file", str(extraction(capture_repo)),
+                             "--json").stdout)
+    assert data["bands"]["same_claim"] == 0.9 and data["bands"]["touches"] == 0.5
+
+
+def test_inverted_bands_are_a_configuration_error(capture_repo):
+    cfg = (capture_repo / "config.yml").read_text(encoding="utf-8")
+    (capture_repo / "config.yml").write_text(
+        cfg + "\nquery:\n  same_claim: 0.1\n  touches: 0.5\n", encoding="utf-8")
+    result = run_script("query.py", capture_repo, "--from-file", str(extraction(capture_repo)))
+    assert result.returncode == 2
+    assert "must be below" in result.stderr
+
+
+# -- the usage matrix ---------------------------------------------------------
+
+def test_no_query_and_no_from_file_is_a_usage_error(clean_repo):
+    result = run_script("query.py", clean_repo)
+    assert result.returncode == 2
+    assert "--from-file" in result.stderr
+
+
+def test_a_query_and_from_file_together_are_a_usage_error(capture_repo):
+    result = run_script("query.py", capture_repo, "atomic notes",
+                        "--from-file", str(extraction(capture_repo)))
+    assert result.returncode == 2
+    assert "different questions" in result.stderr
+
+
+def test_from_file_outside_the_repo_is_a_usage_error(clean_repo, tmp_path):
+    outside = tmp_path / "elsewhere.txt"
+    outside.write_text("Some prose that is quite long indeed and worth scoring.\n",
+                       encoding="utf-8")
+    result = run_script("query.py", clean_repo, "--from-file", str(outside))
+    assert result.returncode == 2
+    assert "must be inside" in result.stderr
+
+
+def test_from_file_on_a_missing_path_is_a_usage_error(clean_repo):
+    result = run_script("query.py", clean_repo, "--from-file", str(clean_repo / "nope.txt"))
+    assert result.returncode == 2
+    assert "no such file" in result.stderr
+
+
+def test_from_file_on_the_pdf_names_the_txt_beside_it(capture_repo):
+    pdf = next((capture_repo / "raw").glob("*a-passage-paper.pdf"))
+    result = run_script("query.py", capture_repo, "--from-file", str(pdf))
+    assert result.returncode == 2
+    assert "text extraction" in result.stderr
+    assert "a-passage-paper.txt" in result.stderr
+
+
+def test_passage_mode_refuses_file_gaps(capture_repo):
+    """Auto-filing a passage would mint a literature note with no body."""
+    before = tree_hash(capture_repo)
+    result = run_script("query.py", capture_repo, "--from-file",
+                        str(extraction(capture_repo)), "--file-gaps")
+    assert result.returncode == 2
+    assert "read-only" in result.stderr
+    assert tree_hash(capture_repo) == before
+
+
+def test_a_query_shaped_gap_selection_names_the_fix(clean_repo):
+    """Now that the positional is optional, query.py's own validator sees it."""
+    result = run_script("query.py", clean_repo, "--file-gaps", "atomic notes")
+    assert result.returncode == 2
+    assert "gap ids like 'g1,g3'" in result.stderr
 
 
 def test_empty_query_is_a_usage_error(clean_repo):

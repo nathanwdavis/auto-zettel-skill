@@ -17,6 +17,7 @@ because a permanent note's title is its claim.
 
     query.py --repo <path> "<query>" [--top N] [--gaps N] [--include-raw]
              [--json] [--mermaid] [--file-gaps [g1,g3]]
+    query.py --repo <path> --from-file raw/<id>-<slug>.txt   (passage mode)
 
 A query is not an operation, so nothing is appended to log.md (A9). The one
 exception is explicit: ``--file-gaps`` turns the report's suggested
@@ -40,11 +41,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import capture
 import lint_citations
-from zettel_lib import graph, similarity
+from zettel_lib import graph, passages, similarity
 from zettel_lib.cli import EXIT_OK, EXIT_USAGE, base_parser, open_repo
 from zettel_lib.frontmatter import FrontmatterError, Note
 from zettel_lib.repo import (STRONG_TIERS, WEAK_TIER, ContentRepo, ContentRepoError,
-                             dig, stale_inquiry_days)
+                             dig, passage_bands, stale_inquiry_days)
 
 TYPE_ORDER = ("permanent", "literature", "reference", "moc", "fleeting")
 
@@ -168,6 +169,150 @@ def raw_mentions(repo: ContentRepo, terms: list[str]) -> dict[str, list[str]]:
         for term in present:
             hits[term].append(repo.rel(path))
     return {t: v for t, v in hits.items() if v}
+
+
+def check_from_file(repo: ContentRepo, raw: Path) -> Path:
+    """Validate a --from-file path, or raise with the fix in the message.
+
+    Outside the repo is refused rather than read: passage mode's entire output
+    is `capture.py literature --reference <key>` commands, and the reference is
+    resolved from a repo-relative `raw_capture`. A file the repository does not
+    hold has no reference note and can yield no citable locator.
+    """
+    path = Path(raw).resolve()
+    if not path.exists():
+        raise ValueError(f"no such file: {raw}")
+    if not path.is_relative_to(repo.root):
+        raise ValueError(f"--from-file must be inside {repo.root}; got {path}")
+    if path.suffix.lower() != ".txt":
+        sibling = path.with_suffix(".txt")
+        hint = (f"; try {repo.rel(sibling)}" if sibling.exists()
+                else " (ingest_drops.py writes one beside every capture it takes)")
+        raise ValueError(
+            f"passage mode reads the text extraction, not the capture itself{hint}")
+    return path
+
+
+def passage_report(repo: ContentRepo, path: Path, *, top: int = 15) -> dict:
+    """Score a capture's text extraction passage by passage. Reads only.
+
+    The commands it prints are the deliverable. A `none` chunk gets a
+    ready-to-run `capture.py literature` line with its locator already filled
+    in, because that is the step a reader would otherwise do by hand -- and
+    hand-authoring a literature note is what capture.py exists to prevent.
+
+    A `same-claim` or `touches` chunk gets no runnable command, only the note it
+    lands on. Offering one would invite a duplicate.
+    """
+    notes, warnings = load_notes(repo)
+    by_key = {n.key: n for n in notes if n.key}
+    docs = {k: doc_text(n) for k, n in by_key.items() if n.type in passages.CLAIM_TYPES}
+
+    cfg = {}
+    try:
+        cfg = repo.config()
+    except ContentRepoError:
+        pass
+    same_claim, touches = passage_bands(cfg)
+
+    reference, ref_warnings = passages.reference_for_capture(repo, path)
+    warnings.extend(ref_warnings)
+    if reference is None:
+        # No command is better than a command with a placeholder in it: a
+        # checklist naming a placeholder is one that gets improvised around,
+        # and a literature note must name a reference that exists.
+        warnings.append(
+            f"no reference note names {repo.rel(path)}, so no literature command can be "
+            "offered; mint one with `capture.py reference` (or re-drop the file through "
+            "ingest_drops.py) and re-run")
+
+    analysis = passages.analyse(repo, path, docs, same_claim=same_claim, touches=touches)
+    repo_arg = shlex.quote(str(repo.root))
+    for chunk in analysis["chunks"]:
+        chunk["matches"] = chunk["matches"][:3]
+        chunk["command"] = ""
+        if chunk["verdict"] == passages.NONE and reference:
+            chunk["command"] = (
+                f"scripts/capture.py --repo {repo_arg} literature "
+                f"{shlex.quote(headline(chunk['text']))} --reference {reference} "
+                f"--locator {shlex.quote(chunk['locator'])} --body -")
+
+    candidates = [c["index"] for c in analysis["chunks"] if c["verdict"] == passages.NONE]
+    return {
+        "mode": "passage",
+        "query": "",
+        "source": repo.rel(path),
+        "reference": reference,
+        "note_count": len(by_key),
+        "corpus": len(docs),
+        "bands": {"same_claim": same_claim, "touches": touches,
+                  "min_shared_terms": passages.MIN_SHARED_TERMS,
+                  "min_chunk_tokens": passages.MIN_CHUNK_TOKENS},
+        "chunks": analysis["chunks"],
+        "skipped": analysis["skipped"],
+        "paginated": analysis["paginated"],
+        "candidates": candidates,
+        # Present and empty so a consumer that parses either mode never has to
+        # ask which one it got before reading a key; `mode` is how it branches.
+        "matched": [], "connected": [], "edges": [], "moc_membership": {},
+        "inquiries": [], "topics": [], "mermaid": "",
+        "gaps": [], "gap_details": [], "suggestions": [], "filed": [],
+        "warnings": warnings,
+    }
+
+
+def headline(text: str, limit: int = 80) -> str:
+    """A chunk's first sentence, trimmed at a word boundary, as a note title."""
+    first = re.split(r"(?<=[.!?])\s", text.strip())[0]
+    if len(first) <= limit:
+        return first
+    return first[:limit].rsplit(" ", 1)[0] + "..."
+
+
+def render_passages(report: dict) -> str:
+    out = [f"# Passages in `{report['source']}` against what the base knows", ""]
+    skipped = report["skipped"]
+    out.append(f"{len(report['chunks'])} passage(s) scored against "
+               f"{report['corpus']} claim-bearing note(s); "
+               f"{skipped['short']} too short to score and {skipped['preamble']} "
+               "extraction header(s) set aside.")
+    if report["reference"]:
+        out.append(f"Source on file as `{report['reference']}`.")
+    if not report["paginated"]:
+        out.append("No page markers in this extraction, so locators are paragraph "
+                   "ordinals rather than pages.")
+    out.append("")
+
+    groups = ((passages.NONE, "Candidate claims (nothing in the base is close)"),
+              (passages.TOUCHES, "Touches a note (related, but not the same claim)"),
+              (passages.SAME_CLAIM, "Already stated (the base makes this claim)"))
+    for verdict, title in groups:
+        rows = [c for c in report["chunks"] if c["verdict"] == verdict]
+        out.append(f"## {title} -- {len(rows)}")
+        if not rows:
+            out.append("- none")
+        for row in rows:
+            out.append(f"- **{row['locator']}** {row['text'][:200]}"
+                       + ("..." if len(row["text"]) > 200 else ""))
+            if row["matches"] and verdict != passages.NONE:
+                best = row["matches"][0]
+                out.append(f"  nearest: `{best['key']}` (score {best['score']:.3f}, "
+                           f"{best['shared']} shared terms)")
+            if row["command"]:
+                out.append(f"  {row['command']}")
+        out.append("")
+
+    if report["candidates"] and report["reference"]:
+        out.append("Each candidate command writes one literature note in your own words "
+                   "-- the passage above is what to summarise, not what to paste, and "
+                   "the title in the command is its opening sentence, there to be "
+                   "replaced with what the note actually says. Then distil the claim:")
+        out.append(f"    scripts/capture.py --repo <repo> permanent \"<claim>\" "
+                   "--link <the key capture.py just printed>:elaborates --body -")
+        out.append("")
+    for w in report["warnings"]:
+        out.append(f"warning: {w}")
+    return "\n".join(out)
 
 
 def rank_gaps(found: list[Gap], cap: int = 0) -> tuple[list[str], list[dict], list[dict]]:
@@ -641,7 +786,11 @@ def render(report: dict, repo_path: str, mermaid: bool = False) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = base_parser(__doc__.splitlines()[0])
-    parser.add_argument("query", help="free-text question or topic")
+    parser.add_argument("query", nargs="?", default="",
+                        help="free-text question or topic (omit only with --from-file)")
+    parser.add_argument("--from-file", metavar="PATH", type=Path, default=None,
+                        help="passage mode: read a capture's .txt extraction and score "
+                             "it chunk by chunk against the notes the base already has")
     parser.add_argument("--top", type=int, default=15,
                         help="maximum matched notes to report (default 15)")
     parser.add_argument("--json", action="store_true", help="emit the report as JSON")
@@ -659,25 +808,58 @@ def main(argv: list[str] | None = None) -> int:
                              "through capture.py instead of only printing them; bare files "
                              "every one, or name the gap ids to file")
     args = parser.parse_args(argv)
-    if not args.query.strip():
-        print("error: empty query", file=sys.stderr)
+    # Usage before environment: a caller who got the arguments wrong should be
+    # told that, not that their directory is not a content repo.
+    if args.from_file is None and not args.query.strip():
+        # The likeliest way to reach this is `--file-gaps <query>`: the flag
+        # takes an optional value, so it swallows a query written after it and
+        # the positional is left empty. Naming that beats "give a query".
+        swallowed = (args.file_gaps not in (None, ALL_GAPS)
+                     and not all(GAP_ID.match(i.strip())
+                                 for i in args.file_gaps.split(",") if i.strip()))
+        if swallowed:
+            message = (f"--file-gaps takes gap ids like 'g1,g3'; got "
+                       f"{args.file_gaps!r} (put the query before the flag)")
+        elif args.query:
+            message = "empty query"
+        else:
+            message = "give a query, or --from-file PATH"
+        print(f"error: {message}", file=sys.stderr)
+        return EXIT_USAGE
+    if args.from_file is not None and args.query.strip():
+        print("error: a query and --from-file ask different questions; pass one",
+              file=sys.stderr)
         return EXIT_USAGE
     if args.gaps < 0:
         print("error: --gaps must be >= 0", file=sys.stderr)
         return EXIT_USAGE
     repo = open_repo(args.repo)
+
     try:
-        report = query(repo, args.query, top=max(1, args.top), gap_cap=args.gaps,
-                       include_raw=args.include_raw)
-        # `is not None` is what keeps "writes nothing without --file-gaps"
-        # literally true: an empty selection string is still a request.
-        if args.file_gaps is not None:
-            file_gaps(repo, report, args.file_gaps)
+        if args.from_file is not None:
+            path = check_from_file(repo, args.from_file)
+            if args.file_gaps is not None:
+                # Not conservatism: a literature note needs prose a person
+                # writes, and auto-filing these would mint bodyless notes --
+                # the failure capture.py exists to prevent.
+                print("error: passage mode is read-only; its suggestions need a body "
+                      "you write", file=sys.stderr)
+                return EXIT_USAGE
+            report = passage_report(repo, path, top=max(1, args.top))
+        else:
+            report = query(repo, args.query, top=max(1, args.top), gap_cap=args.gaps,
+                           include_raw=args.include_raw)
+            # `is not None` is what keeps "writes nothing without --file-gaps"
+            # literally true: an empty selection string is still a request.
+            if args.file_gaps is not None:
+                file_gaps(repo, report, args.file_gaps)
     except (ContentRepoError, FrontmatterError, OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_USAGE
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
+    elif report.get("mode") == "passage":
+        print(render_passages(report))
     else:
         print(render(report, str(repo.root), mermaid=args.mermaid))
     return EXIT_OK
