@@ -220,13 +220,27 @@ sed -i.bak 's/^status: answered/status: new/' "$INQ" && rm -f "$INQ.bak"
 pass "AC-6 rejects an answered inquiry with no result_notes"
 
 # A10: the query mode maps what exists and writes nothing -- not even a log line.
+# Captured before matching, never piped: under pipefail `cmd | grep -q` reports
+# CMD's status, so a tool that legitimately exits non-zero fails the assertion
+# even when the match succeeded.
 LOG_BEFORE="$(sha256sum "$KB/log.md")"
-"$PY" scripts/query.py --repo "$KB" "captured thought" | grep -q "nothing has been filed" \
-  || fail "query.py report"
-"$PY" scripts/query.py --repo "$KB" "captured thought" --json | grep -q '"matched"' \
-  || fail "query.py --json"
+Q="$("$PY" scripts/query.py --repo "$KB" "captured thought" 2>&1 || true)"
+echo "$Q" | grep -q "nothing has been filed" || fail "query.py report (got: $Q)"
+QJ="$("$PY" scripts/query.py --repo "$KB" "captured thought" --json 2>&1 || true)"
+for key in '"matched"' '"edges"' '"moc_membership"' '"gap_details"' '"mermaid"'; do
+  echo "$QJ" | grep -q "$key" || fail "query --json lost $key (got: ${QJ:0:300})"
+done
 [[ "$(sha256sum "$KB/log.md")" == "$LOG_BEFORE" ]] || fail "query.py wrote to log.md"
 pass "query.py mapped existing coverage without writing anything (A10)"
+
+# A13: the subgraph renders as a section of the report, and deterministically.
+M1="$("$PY" scripts/query.py --repo "$KB" "captured thought" --mermaid 2>&1 || true)"
+M2="$("$PY" scripts/query.py --repo "$KB" "captured thought" --mermaid 2>&1 || true)"
+echo "$M1" | grep -q '```mermaid' || fail "--mermaid drew no diagram (got: ${M1:0:200})"
+echo "$M1" | grep -q "^# What the base knows" \
+  || fail "--mermaid replaced the report instead of joining it (got: ${M1:0:200})"
+[[ "$M1" == "$M2" ]] || fail "--mermaid output is not deterministic across runs"
+pass "the subgraph rendered as a report section, identically twice (A13)"
 
 # A11: a PDF dropped into drop/ becomes a gate-clean reference + capture.
 "$PY" - "$KB" <<'DROPPY'
@@ -234,8 +248,16 @@ import sys
 sys.path.insert(0, "tests"); sys.path.insert(0, "scripts")
 from pathlib import Path
 from conftest import drop_file, make_pdf
-drop_file(Path(sys.argv[1]), "smoke-paper.pdf", make_pdf("A smoke paper\nDropped by the smoke test."),
-          sidecar={"title": "A smoke paper", "author": "Smoke Tester", "year": 2026})
+# Two pages of real prose, so the extraction carries `--- page N ---` markers
+# and passage mode has something to score below.
+drop_file(Path(sys.argv[1]), "smoke-paper.pdf", make_pdf(pages=[
+    "A smoke paper dropped by the smoke test, whose first page argues that a "
+    "captured thought only becomes knowledge once somebody writes it down in "
+    "their own words and links it to what the base already holds.",
+    "The second page concerns something else entirely, namely the tidal "
+    "locking of exoplanets and its effect on atmospheric circulation near the "
+    "terminator boundary of a planetary body that never rotates.",
+]), sidecar={"title": "A smoke paper", "author": "Smoke Tester", "year": 2026})
 DROPPY
 "$PY" scripts/ingest_drops.py --repo "$KB" | grep -q "^ingested" || fail "ingest_drops.py"
 ls "$KB"/reference/a-smoke-paper--*.md >/dev/null 2>&1 || fail "dropped source has no reference note"
@@ -244,9 +266,56 @@ ls "$KB"/raw/*-a-smoke-paper.pdf >/dev/null 2>&1 || fail "dropped source not cap
 grep -q "Dropped source ready" "$KB/INBOX.md" || fail "no INBOX entry for the drop"
 for g in build_manifest.py lint_citations.py lint_links.py; do
   args=(); [[ "$g" == build_manifest.py ]] && args=(--check)
-  "$PY" "scripts/$g" --repo "$KB" "${args[@]}" >/dev/null || fail "$g after drop ingest"
+  # ${a[@]+"${a[@]}"}, not "${a[@]}": under `set -u` bash 3.2 -- still the
+  # system bash on macOS -- treats an empty array expansion as unbound.
+  "$PY" "scripts/$g" --repo "$KB" ${args[@]+"${args[@]}"} >/dev/null || fail "$g after drop ingest"
 done
 pass "a dropped PDF was ingested into a gate-clean reference and capture (A11)"
+
+# A13: passage mode reads that extraction back, page by page, and writes nothing.
+TXT="$(ls "$KB"/raw/*-a-smoke-paper.txt 2>/dev/null | head -1)"
+[[ -n "$TXT" ]] || fail "the drop produced no text extraction to read"
+grep -q -- "--- page 2 ---" "$TXT" || fail "the extraction lost its page markers"
+LOG_BEFORE="$(sha256sum "$KB/log.md")"
+PSG="$("$PY" scripts/query.py --repo "$KB" --from-file "$TXT" 2>&1 || true)"
+echo "$PSG" | grep -q -- "--locator 'p\. " \
+  || fail "passage mode lost the page locator (got: ${PSG:0:400})"
+echo "$PSG" | grep -q "a-smoke-paper--" \
+  || fail "passage mode did not name the reference (got: ${PSG:0:400})"
+[[ "$(sha256sum "$KB/log.md")" == "$LOG_BEFORE" ]] || fail "passage mode wrote to log.md"
+PSG_ERR="$("$PY" scripts/query.py --repo "$KB" --from-file "$TXT" --file-gaps 2>&1 || true)"
+echo "$PSG_ERR" | grep -q "read-only" \
+  || fail "passage mode must refuse --file-gaps (got: $PSG_ERR)"
+PDF="$(ls "$KB"/raw/*-a-smoke-paper.pdf | head -1)"
+PDF_ERR="$("$PY" scripts/query.py --repo "$KB" --from-file "$PDF" 2>&1 || true)"
+echo "$PDF_ERR" | grep -q "text extraction" \
+  || fail "--from-file on the capture should name the .txt beside it (got: $PDF_ERR)"
+pass "passage mode cited pages from the extraction and wrote nothing (A13)"
+
+# A13: gaps are addressable, and a rejected selection writes nothing at all.
+INQ_BEFORE="$(ls "$KB"/inquiries/*.md 2>/dev/null | wc -l | tr -d ' ')"
+BAD="$("$PY" scripts/query.py --repo "$KB" "quantum chromodynamics" --file-gaps g99 2>&1 || true)"
+echo "$BAD" | grep -q "unknown gap id" || fail "an unknown gap id must be refused (got: $BAD)"
+INQ_AFTER="$(ls "$KB"/inquiries/*.md 2>/dev/null | wc -l | tr -d ' ')"
+[[ "$INQ_AFTER" == "$INQ_BEFORE" ]] \
+  || fail "a rejected gap selection still wrote ($INQ_BEFORE -> $INQ_AFTER)"
+SEL="$("$PY" scripts/query.py --repo "$KB" "quantum chromodynamics" --file-gaps g1 2>&1 || true)"
+echo "$SEL" | grep -q "Filed for the next run" || fail "gap selection filed nothing (got: $SEL)"
+for g in build_manifest.py lint_citations.py lint_links.py; do
+  args=(); [[ "$g" == build_manifest.py ]] && args=(--check)
+  # ${a[@]+"${a[@]}"}, not "${a[@]}": under `set -u` bash 3.2 -- still the
+  # system bash on macOS -- treats an empty array expansion as unbound.
+  "$PY" "scripts/$g" --repo "$KB" ${args[@]+"${args[@]}"} >/dev/null || fail "$g after a gap selection"
+done
+pass "a selected gap filed one gate-clean capture; an unknown id wrote nothing (A13)"
+
+# A14: an offline re-verify must not rewrite the records it could not re-check.
+REFS_BEFORE="$(cd "$KB" && sha256sum reference/*.md | sha256sum)"
+"$PY" scripts/verify_refs.py --repo "$KB" --offline --no-render >/dev/null 2>&1 || true
+REFS_AFTER="$(cd "$KB" && sha256sum reference/*.md | sha256sum)"
+[[ "$REFS_BEFORE" == "$REFS_AFTER" ]] \
+  || fail "an offline verify rewrote reference notes it could not re-check (A14)"
+pass "an offline verify left every verification record untouched (A14)"
 
 # A12: the note generators. Each must refuse at WRITE time what the lints
 # refuse at gate time, and the reference generator must be honest about what it
@@ -290,7 +359,9 @@ GLIT="$("$PY" scripts/capture.py --repo "$KB" literature "Sam on generation" \
   --link "$(basename "$GLIT" .md):elaborates" >/dev/null || fail "capture.py permanent"
 for g in build_manifest.py lint_citations.py lint_links.py; do
   args=(); [[ "$g" == build_manifest.py ]] && args=(--check)
-  "$PY" "scripts/$g" --repo "$KB" "${args[@]}" >/dev/null || fail "$g after the generators"
+  # ${a[@]+"${a[@]}"}, not "${a[@]}": under `set -u` bash 3.2 -- still the
+  # system bash on macOS -- treats an empty array expansion as unbound.
+  "$PY" "scripts/$g" --repo "$KB" ${args[@]+"${args[@]}"} >/dev/null || fail "$g after the generators"
 done
 pass "generated reference, literature, and permanent notes pass every gate"
 
