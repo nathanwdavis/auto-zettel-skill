@@ -155,17 +155,32 @@ handles JavaScript-only pages. See
 ### Query — what does the base already know?
 
 ```sh
-scripts/query.py --repo <content-repo> "atomic notes" [--top 15] [--json]
+scripts/query.py --repo <content-repo> "atomic notes" [--top 15] [--json] [--mermaid]
+scripts/query.py --repo <content-repo> --from-file raw/<id>-<slug>.txt   # passage mode
 ```
 
 Ranks every note against the query, groups the matches by type (claims,
 literature, sources with their verification state, maps), lists open
-inquiries that touch the topic and the notes one link away, and names the
-gaps: terms the base never uses, matches with no distilled claim, notes no
-MOC reaches. It reads only — no research, no notes, no log line — and ends
-with one suggested follow-up per gap as a ready-to-run `capture.py` command.
-Add `--file-gaps` (or tell the session to) and it captures them all for the
-next run. Details: [`references/query.md`](references/query.md).
+inquiries that touch the topic and the notes one link away, emits the typed
+edges between everything it named — plus `mentions` for body wikilinks, and a
+Mermaid diagram of the subgraph under `--mermaid` — and **ranks** the gaps:
+terms the base never uses, claims resting only on weak sources, questions asked
+and never worked, matches with no distilled claim, sources captured and never
+read, claims nothing links to, notes no MOC reaches, and (under
+`--include-raw`) terms only a `raw/` capture uses.
+
+It reads only — no research, no notes, no log line — and ends with one
+suggested follow-up per gap as a ready-to-run `capture.py` command. Each gap
+carries an id, so `--file-gaps g1,g3` captures a selection where bare
+`--file-gaps` still captures all of them.
+
+**Passage mode** (`--from-file`) reads a capture's text extraction back page by
+page and sorts every passage into three piles: already stated, related, and
+nothing close. The third pile comes with a `capture.py literature` command per
+passage, locator already filled in — so ingesting a source becomes "here are
+the eleven passages nobody has written down" rather than "here are ninety
+pages". Read-only, and it refuses `--file-gaps`: a literature note needs prose
+you write. Details: [`references/query.md`](references/query.md).
 
 ### Session flows — answer, ingest, or close gaps now
 

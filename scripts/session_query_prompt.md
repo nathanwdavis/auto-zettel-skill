@@ -6,8 +6,9 @@ are already filed on this branch:
 They were filed *after* the branch existed, so they land in this cycle's PR
 rather than sitting in a working tree the next run would overwrite.
 
-Now work them. Each kind of gap asks for different work, and the entry that
-was filed says which:
+Each filed entry closes a numbered gap (`g1` first), and they were filed in
+priority order. Now work them. Each kind asks for different work, and the entry
+that was filed says which:
 
 - **An inquiry** is a research job: the base has nothing on the topic. Work it
   as an ad-hoc question -- check coverage, capture sources, write the notes,
@@ -26,6 +27,22 @@ was filed says which:
   structural work: add them to the right MOC with a line of context each, or
   create a MOC when a cluster of three or more has none. INDEX links only to
   MOCs.
+
+- **"Write the literature note ... for `<key>`"** means a source is captured
+  and nobody has read it. Read the capture in `raw/` and summarise it in your
+  own words with a locator. Do not re-fetch it.
+
+- **"Link `<key>` into the graph"** means nothing in the base refers to that
+  claim, so it will never be met again by accident. Propose a typed relation to
+  a related claim, or run `serendipity_sweep.py` and read what it offers.
+
+- **"Work or archive the stale inquiry `<key>`"** means a question was asked
+  long ago and never worked. Answer it, or archive it with a reason -- an
+  inquiry nobody will ever work is noise in every future report.
+
+- **"Find a primary or peer-reviewed source for: ..."** means a claim rests
+  only on general-web sources. This is research, and the note stays as it is
+  until a stronger source is on file.
 
 Work the entries in the order they were filed; a research gap is worth more
 than a mapping gap, and the filing order reflects that.

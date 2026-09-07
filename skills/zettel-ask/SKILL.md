@@ -4,7 +4,7 @@ description: Researches a question now against a zettel-bootstrap Zettelkasten c
 license: MIT
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch
 metadata:
-  version: 0.2.0
+  version: 0.3.0
   parent: zettel-bootstrap
 ---
 

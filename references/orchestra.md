@@ -35,8 +35,9 @@ hand-written note fails the manifest build for whoever runs *next* rather than
 for its author. `templates/` remains the reference for what each note type
 carries; it is no longer the way to write one.
 
-The orchestrator plans against `query.py --json`, which names each gap and the
-role it needs, and is read-only and free (A9).
+The orchestrator plans against `query.py --json`, which names each gap, ranks
+it, and says which role it needs; `--gaps N` bounds a plan to the N that matter
+most. It is read-only and free (A9).
 
 ## Model tiers (AC-29)
 

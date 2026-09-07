@@ -31,7 +31,10 @@ entries marked `new`, then `in-progress`.
    "<topic>" --json` names the gaps and which role each one needs (a
    researcher for a topic the base lacks, a synthesizer for captured material
    nobody distilled, the librarian for notes no MOC reaches). It is read-only
-   and costs nothing. Log the plan as one line in `log.md`.
+   and costs nothing. Each gap carries an id and a rank; `--gaps N` keeps the N
+   most important, which is how you bound a plan to a cycle's budget rather
+   than by dropping whichever gaps came last. Log the plan as one line in
+   `log.md`.
 4. For each research/synthesis stream, create an isolated worktree with
    `new_worktree.sh --repo <repo> --name <branch>` and hand its path to the
    agent you dispatch.

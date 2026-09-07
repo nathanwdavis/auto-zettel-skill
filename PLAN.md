@@ -3,7 +3,7 @@
 **Source of truth:** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (all FR-x / AC-x / NFR-x / QA-x / checklist references below point there). Deviations forced by implementation are recorded there as numbered amendments — **A1–A12** so far.
 **Working on this repo:** [`.claude/CLAUDE.md`](.claude/CLAUDE.md) — how to run the suite, the environment's sharp edges, and the conventions.
 **This repo:** the skill repo. It contains ONLY the `zettel-bootstrap` plugin — never zettelkasten content. The content repo is created at genesis runtime by `init_content_repo.sh` and is out of scope for this repo's file tree. Both repos are public (A4); nothing here may contain a secret (NFR-4).
-**Status:** All phases complete — 1, 2, 3, 3.5, 3.6 (PR #5), 4 (PR #6) — plus two rounds of field fixes from live scheduled runs: issue #7 → PR #8 (amendment A8), and the stale-install/frozen-prompt round → PR #10. Every §12 checklist item passes. **Round 8 (session flows): Phases 1 and 2 shipped (amendment A12); Phase 3 planned** — see its section in §2. What else remains is operational, not code: see **Handoff — next steps** at the end of §2.
+**Status:** All phases complete — 1, 2, 3, 3.5, 3.6 (PR #5), 4 (PR #6) — plus two rounds of field fixes from live scheduled runs: issue #7 → PR #8 (amendment A8), and the stale-install/frozen-prompt round → PR #10. Every §12 checklist item passes. **Round 8 (session flows): complete** — Phases 1 and 2 (amendment A12), Phase 3 (A13), plus the verification-integrity fix a live run forced (A14). What remains is operational, not code: see **Handoff — next steps** at the end of §2.
 
 ---
 
@@ -352,7 +352,7 @@ no pypdf / sandbox gate on the move); `start` and the wrapper ingest a drop;
 OA lookup is enrichment (an unreachable OA registry never blocks Crossref);
 a shell with `renderer: none` is never saved.
 
-### Post-Phase-4 round 8 — session flows, by layer  🔨 Phases 1-2 shipped; 3 planned
+### Post-Phase-4 round 8 — session flows, by layer  ✅ shipped
 *Amendment A12 (to be appended when Phase 2 ships). Exit gate: each of the
 three session use cases runs end to end from one slash command with no
 hand-written frontmatter and no hand-sequenced lock/branch/gate steps.*
@@ -459,7 +459,7 @@ What Phase 2 taught:
   no `{{` survives substitution, because a leaked placeholder is a step the
   session will improvise.
 
-**Phase 3 -- graph and gaps**
+**Phase 3 -- graph and gaps  ✅ shipped** (618 tests, smoke exit 0, strict validate clean)
 9. `query.py --from-file PATH`: passage mode over a capture's `.txt` --
    chunks by page marker and paragraph, each scored against the graph
    (`same-claim` / `touches` / `none`), unmatched chunks listed as candidate
@@ -471,6 +471,39 @@ What Phase 2 taught:
     `weak-sourcing`, `orphan-claim`, `stale-inquiry`, and opt-in
     `raw-mentions` (`--include-raw`); `--gaps N` caps; `--file-gaps g1,g3`
     files a selection (bare `--file-gaps` still files all).
+
+What Phase 3 taught:
+
+- **Calibrate against a real base, not the fixtures.** The passage bands were
+  first derived from `two_cluster_repo` (8 notes), where a merely related
+  passage scores 0.550 -- above any sane "restates an existing note" threshold.
+  Against the live content repo (237 claim-bearing notes) the same shape of
+  passage scores 0.12-0.34. TF-IDF cosines are corpus-size dependent, so a
+  threshold calibrated on a fixture is calibrated on nothing.
+- **Cosine alone cannot classify a passage.** 87 of 849 real passages matched on
+  ONE term and 47 of those cleared the lower band on score alone -- almost all
+  OCR noise, where one accidental word carries a short chunk's whole vector. The
+  fix was a second signal (distinct shared terms), not a higher threshold.
+- **An approximated predicate announces failures that are not.** query.py's
+  first `uncited-claim` warning fired for any permanent note with no verified
+  reference; `lint_citations` fires only when the note also makes a *sourced*
+  claim. It reported three fixture notes as failing a gate they pass. Import the
+  gate's predicate; never restate it.
+- **A test can encode the bug.** `verify_refs`' Open Library "miss" cassette was
+  `200 {}` -- the exact response the live endpoint gives for books that exist --
+  so the suite asserted the behaviour that was destroying records in the field.
+  When a defect has been reported from production four times and every test
+  passes, suspect the fixtures.
+- **Prove a field fix against the field.** The verifier change was verified by
+  running `verify_refs.py --offline` over a clone of the live content repo on
+  both `main` and the branch: 22 reference notes rewritten before, 0 after. No
+  unit test would have shown that number.
+- **Two pre-existing bugs surfaced only outside CI**: the degraded-sweep test's
+  import blocker used `find_module`/`load_module`, removed in Python 3.12, so it
+  had silently stopped blocking; and `"${args[@]}"` on an empty array is an
+  unbound-variable error under `set -u` in bash 3.2, still the system bash on
+  macOS, so `smoke_test.sh` died at its first lint call there. CI runs neither
+  configuration.
 
 **Must not change**: `start` stdout branch-only; the test-asserted `finish`
 literals; `query.py` writes nothing without `--file-gaps`; `gaps` stays a
@@ -497,29 +530,26 @@ What remains happens in the *environment* and the *content repo*, not here.
 "Automatically delete head branches" are on. Before that a red PR merged on a
 click, which is how a failing manifest check reached `main` twice.
 
-**Still open, in priority order:**
+**Closed since, and checked rather than assumed** (2026-09-07, against
+`nathanwdavis/auto-zettel-sandbox`):
 
-1. **Update or recreate the Routine so its prompt is current.** This is the
-   critical path and PR #10 does not do it: a stale installed `start` does not
-   contain the self-refresh, so the Routine's stored prompt must run
-   `refresh-skill` once to bootstrap the new code into place. After that single
-   hop, freshness holds structurally. The current template also carries the
-   named-agent self-review fallback, step-3 approved-skill reads, the step-7
-   sandbox check + auto-trial, and the auto-merge instruction — none of which
-   reach a Routine created before them. **A prompt-only fix is not a fix for
-   existing Routines** (see `.claude/CLAUDE.md`, "A Routine's prompt freezes").
-2. **Re-copy `ci/content-repo-gates.yml` into the content repo** as
-   `.github/workflows/gates.yml`. *Verified still stale on 2026-09-01*: the
-   installed copy is missing `fetch-depth: 0` on the content checkout and both
-   Phase-4 steps (`lint_skills.py`, `check_skill_sandbox.py`). Until this is
-   re-copied the skill-emergence rails are **not enforced server-side** — a
-   smith proposal would reach `main` ungated, and the sandbox gate's merge-base
-   needs the full fetch depth. (New content repos no longer have this
-   problem: genesis installs the workflow, A9.) **Also**: the round-5 lint
-   rules (`moc-empty`, `duplicate-source`, `missing-field`, `bad-source-tier`,
-   `missing-locator`, `reference-mismatch`, ISO `updated`) run in that CI the
-   moment the copy is current — run the lints against the live repo first
-   and fix any note they name; never relax the rule.
+1. ~~**Update or recreate the Routine so its prompt is current.**~~ **Working.**
+   `skill-rev` in the content repo's `log.md` progresses `effad78 → 9f2fc67 →
+   6e3fa27 → d986b16` across 88 logged runs, so PR #10's self-refresh in `start`
+   is doing its job and freshness now holds structurally. The one-time
+   bootstrap caveat still stands for any Routine created *before* that landed:
+   its frozen prompt must run `refresh-skill` once (see `.claude/CLAUDE.md`,
+   "A Routine's prompt freezes"). Confirm the next cycle after a skill-repo
+   merge logs the new revision.
+2. ~~**Re-copy `ci/content-repo-gates.yml` into the content repo.**~~ **Done.**
+   The installed `.github/workflows/gates.yml` now differs from this repo's copy
+   by one comment line: it carries `fetch-depth: 0` and both Phase-4 steps
+   (`lint_skills.py`, `check_skill_sandbox.py`), so the skill-emergence rails
+   *are* enforced server-side. The 2026-09-01 note above was stale; it was
+   verified by diffing the installed file, not by presence check.
+
+**Still open:**
+
 3. **The live handoff check** — capture an inquiry, let the next scheduled
    Routine pick it up, confirm it lands `answered` with a `result_notes`
    backlink. Still the only end-to-end test of the human → scheduled-run path
@@ -528,6 +558,18 @@ click, which is how a failing manifest check reached `main` twice.
    proposal under the content repo's `skills/`, a `proposed` + `trial` record
    in `skill-impact.md`, and a human `skill_review.py promote|reject` decision
    waiting.
+4. **Confirm the verifier fix in the field (A14).** Every cycle since
+   2026-09-04 has had to hand-restore reference notes the verifier degraded,
+   and has said so in `log.md`. The first cycle after A14 merges should report
+   **no restored records** — that, not a unit test, is what closes the defect.
+   If it still restores any, the remaining cause is a different one and the
+   INBOX entries under "Tooling, HIGH" name the candidates.
+5. **The verifier defects the live runs filed but this round did not fix.**
+   Both are root-caused in the content repo's INBOX and both are real:
+   `verify_refs.py` resolves DOIs against Crossref only, so every
+   DataCite-registered DOI is indistinguishable from a rotted identifier; and
+   cycles append to `log.md` with `printf`, which eats apostrophes and makes the
+   run log unsearchable for the words it most needs. Each is its own round.
 
 **Diagnosing a run that misbehaved**, in the order that has actually worked:
 the `start` line's `skill-rev=` (absent or old ⇒ stale install, and suspect
