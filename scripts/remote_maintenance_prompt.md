@@ -21,9 +21,9 @@ Otherwise it prints your run branch. Do all work on it. Everything the cycle
 produces -- notes, captures, ledger lines, a skill-smith proposal -- must be
 committed on the branch you push: nothing may be left on a local-only branch or
 worktree, because a cloud container is reclaimed and the owner reviews only
-what reaches GitHub. Then follow the cycle below IN ORDER, appending one line to log.md after each step in the form
-`- <UTC timestamp> step <N>: <what happened>`. Skip a step that has nothing to
-do, and log the skip.
+what reaches GitHub. Then follow the cycle below IN ORDER, appending one line
+to log.md after each step in the form `- <UTC timestamp> step <N>: <what
+happened>`. Skip a step that has nothing to do, and log the skip.
 
 Where a step says to delegate to a named agent and that agent is NOT
 available in this session, adopt its role directly: read the matching
