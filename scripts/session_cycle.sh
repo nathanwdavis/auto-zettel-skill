@@ -34,7 +34,7 @@ esac
 shift || true
 
 REPO=""; QUESTION=""; PRIORITY="normal"; BODY=""; HAVE_BODY=0
-SOURCE=""; TOP=""; QUERY=""
+SOURCE=""; TOP=""; QUERY=""; RUN_BRANCH=""
 declare -a SIDECAR=()
 
 usage() {
@@ -55,6 +55,9 @@ Usage: session_cycle.sh <ask|ingest|query> --repo <content-repo> [options]
 Each claims the run lock, opens a run branch, and prints a checklist. Hand off
 with: remote_cycle.sh finish --repo <path>
 
+  --branch <name>  work on <name>, a branch this session was assigned, instead
+                   of a new zettel/run-* branch (passed to remote_cycle.sh start)
+
 Exit codes: 0 ok; 3 lock held by a live run (stand down); 1 failure; 2 usage.
 USAGE
 }
@@ -71,6 +74,7 @@ while [[ $# -gt 0 ]]; do
     --source) SOURCE="${2:-}"; shift 2 ;;
     --from-query) QUERY="${2:-}"; shift 2 ;;
     --top) TOP="${2:-}"; shift 2 ;;
+    --branch) RUN_BRANCH="${2:-}"; shift 2 ;;
     # Sidecar fields are passed through to ingest_drops verbatim, so the two
     # tools cannot describe a source differently.
     --title|--author|--year|--doi|--isbn|--arxiv|--pmid|--url|--source-tier|--notes|--tags)
@@ -110,7 +114,7 @@ if [[ "$BODY" == "-" ]]; then BODY="$(cat)"; fi
 # Exit 3 means a scheduled run is already working. Propagate it unchanged --
 # waiting is the correct behaviour, and remote_cycle.sh never steals a live lock.
 set +e
-BRANCH="$("$SCRIPT_DIR/remote_cycle.sh" start --repo "$REPO")"
+BRANCH="$("$SCRIPT_DIR/remote_cycle.sh" start --repo "$REPO" ${RUN_BRANCH:+--branch "$RUN_BRANCH"})"
 RC=$?
 set -e
 if [[ $RC -eq 3 ]]; then

@@ -426,15 +426,17 @@ Read these only when the task calls for them:
 
 ## Rules that do not bend
 
-- **Every maintenance cycle, ad-hoc question, ingest and query-gap run ends in
-  a PR to the default branch, opened by the session itself.** This is the
-  owner's standing instruction, so it is the explicit request for a PR that a
-  harness default may otherwise wait for: never ask whether to open one. Only
-  an odd case ends without one -- a stand-down, a branch with nothing beyond
-  the default branch, a cycle aborted because it could not finish honestly --
-  and the report says which. On a pre-assigned `claude/...` branch, where
-  `finish` refuses, do its steps by hand: gates, commit, `remote_cycle.sh
-  abort`, push, PR, auto-merge.
+- **Every session-run maintenance cycle, ad-hoc question, ingest and
+  query-gap run ends in a PR to the default branch, opened by the session
+  itself.** This is the owner's standing instruction, so it is the explicit
+  request for a PR that a harness default may otherwise wait for: never ask
+  whether to open one. Only an odd case ends without one -- a stand-down, a
+  branch with nothing beyond the default branch, a cycle aborted because it
+  could not finish honestly -- and the report says which. A session assigned a
+  branch (a cloud session's `claude/...` branch) passes `--branch <name>` to
+  `remote_cycle.sh start` or `session_cycle.sh`, and `finish` hands that
+  branch off like any run branch. (The laptop wrapper, `maintenance_run.sh`,
+  still pushes the branch it ran on directly; see amendment A15.)
 - **Everything a cycle produces travels on the branch it pushes** -- notes,
   captures, ledger lines and a skill-smith proposal alike. Nothing is left on
   a local-only branch or worktree.

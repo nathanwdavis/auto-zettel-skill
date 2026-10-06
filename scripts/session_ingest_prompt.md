@@ -60,10 +60,8 @@ the knowledge base does not already know, and write that down.
    Always end with a PR to the default branch that you open yourself -- the
    owner's standing instruction; never ask whether to open one. If it
    says to open the PR yourself, open it now with the GitHub MCP tools and
-   enable auto-merge (squash). On a pre-assigned `claude/...` branch, where
-   `finish` refuses, do its steps by hand: `gates`, commit,
-   `remote_cycle.sh abort` (commit its log line), push, open the PR, enable
-   auto-merge.
+   enable auto-merge (squash). `finish` hands off a branch
+   started with `--branch` exactly as it does a `zettel/run-*` one.
 
 Tell the user what the source added: which claims are new, which existing
 notes it supports or contradicts, and anything it says that you deliberately

@@ -23,8 +23,12 @@ citation gates.
 SCRIPTS="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)}/scripts"
 
 "$SCRIPTS/session_cycle.sh" ask --repo <content-repo> --question "$ARGUMENTS" \
-  [--priority high] [--body "extra context"]
+  [--priority high] [--body "extra context"] [--branch <assigned-branch>]
 ```
+
+`--branch` is for a session assigned a branch it must work on (a cloud
+session's `claude/...` branch): the cycle runs and hands off there instead of
+on a new `zettel/run-*` branch.
 
 **Then follow the checklist it prints.** It names the branch, the inquiry key,
 and the exact command for each step.

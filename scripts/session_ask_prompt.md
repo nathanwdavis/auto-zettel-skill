@@ -62,9 +62,8 @@ reconstruct them from memory.
    owner's standing instruction; never ask whether to open one. If it
    says to open the PR yourself, open it now with the GitHub MCP tools and
    enable auto-merge (squash) so it lands exactly when the required check
-   passes. On a pre-assigned `claude/...` branch, where `finish` refuses, do
-   its steps by hand: `gates`, commit, `remote_cycle.sh abort` (commit its log
-   line), push, open the PR, enable auto-merge.
+   passes. `finish` hands off a branch
+   started with `--branch` exactly as it does a `zettel/run-*` one.
 
 **Answer the user in chat**, with the sources you verified. They asked a
 question; the notes are the durable record, not the reply. File what is worth

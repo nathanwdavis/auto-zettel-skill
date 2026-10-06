@@ -20,8 +20,12 @@ SCRIPTS="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$(readlink -f "$0")")/../.." && 
 
 "$SCRIPTS/session_cycle.sh" ingest --repo <content-repo> --source <file> \
   [--title "..."] [--author "Family, Given"] [--year 2026] \
-  [--doi ...] [--isbn ...] [--arxiv ...] [--url ...]
+  [--doi ...] [--isbn ...] [--arxiv ...] [--url ...] [--branch <assigned-branch>]
 ```
+
+`--branch` is for a session assigned a branch it must work on (a cloud
+session's `claude/...` branch): the cycle runs and hands off there instead of
+on a new `zettel/run-*` branch.
 
 Pass whatever identity the user gave you. Anything you omit is recovered from
 the file itself: a DOI found on its front pages resolves at Crossref, and the

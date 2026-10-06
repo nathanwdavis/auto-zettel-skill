@@ -26,14 +26,16 @@ case "${1:-}" in
   *) CMD="$1" ;;
 esac
 shift || true
-REPO=""; TTL="${STALE_LOCK_HOURS:-6}"; TITLE=""; NO_GATES=0; ONLINE=0; MAILTO=""; BASE=""
+REPO=""; TTL="${STALE_LOCK_HOURS:-6}"; TITLE=""; NO_GATES=0; ONLINE=0; MAILTO=""; BASE=""; RUN_BRANCH=""
 
 usage() {
   cat <<'USAGE'
 Usage: remote_cycle.sh <start|gates|finish|abort|status|refresh-skill> --repo <content-repo> [options]
 
   start   --repo <path> [--ttl <hours>]   refresh this skill checkout, claim
-                                          lock, pull, create run branch
+          [--branch <name>]               lock, pull, create run branch (or work
+                                          on <name>, a branch the session was
+                                          assigned, instead of zettel/run-*)
   gates   --repo <path> [--online]        run the merge gates as CI runs them
           [--mailto <email>] [--base <rev>]
   finish  --repo <path> [--title <text>]  gate, commit, push branch, open PR,
@@ -58,6 +60,7 @@ while [[ $# -gt 0 ]]; do
     --online) ONLINE=1; shift ;;
     --mailto) MAILTO="${2:-}"; shift 2 ;;
     --base) BASE="${2:-}"; shift 2 ;;
+    --branch) RUN_BRANCH="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; echo "error: unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -236,7 +239,7 @@ print(f"lock: {info.holder} (session {info.session}, {info.age_hours():.2f}h old
       refresh_skill_checkout >&2
       if [[ "$SKILL_BEFORE" != "$SKILL_AFTER" ]]; then
         ZETTEL_SKILL_REFRESHED=1 exec "$SCRIPT_DIR/remote_cycle.sh" start \
-          --repo "$REPO" --ttl "$TTL"
+          --repo "$REPO" --ttl "$TTL" ${RUN_BRANCH:+--branch "$RUN_BRANCH"}
       fi
     fi
 
@@ -245,6 +248,20 @@ print(f"lock: {info.holder} (session {info.session}, {info.age_hours():.2f}h old
     # before any lock work so a bad config never needs a release.
     PYTHONPATH="$SCRIPT_DIR" "$PYBIN" -m zettel_lib.repo --repo "$REPO" --check-config >/dev/null \
       || die "config.yml validation failed (see error above); fix config.yml and re-run"
+
+    # A cloud session is often pinned to a branch it was given (claude/...),
+    # and may push nowhere else. Without --branch, start abandoned that branch
+    # for a fresh zettel/run-* one, and the work had to be carried back by hand
+    # (amendment A15). Settled before the lock, like every usage error: the
+    # default branch and the lock branch are never a run branch.
+    if [[ -n "$RUN_BRANCH" ]]; then
+      [[ "$RUN_BRANCH" =~ ^[A-Za-z0-9._/-]+$ && "$RUN_BRANCH" != -* ]] \
+        || { echo "error: invalid --branch name: $RUN_BRANCH" >&2; exit 2; }
+      if [[ "$RUN_BRANCH" == "$(default_branch)" || "$RUN_BRANCH" == "zettel/lock" ]]; then
+        echo "error: --branch may not be the default branch or the lock branch: $RUN_BRANCH" >&2
+        exit 2
+      fi
+    fi
 
     # Break a provably stale lock, then claim. A LIVE lock is never stolen:
     # two sessions researching the same inquiry pay for it twice.
@@ -292,13 +309,35 @@ print("yes" if ok else f"no\t{holder.holder}\t{holder.session}\t{holder.age_hour
     git -C "$REPO" checkout -q "$DEFAULT_BRANCH"
     git -C "$REPO" pull -q --ff-only origin "$DEFAULT_BRANCH"
 
-    # Second-resolution names collide when a run restarts within a second of
-    # the last (surfaced by the reasons test): uniquify rather than fail.
-    BRANCH="zettel/run-$(date -u +%Y%m%d%H%M%S)"
-    while git -C "$REPO" show-ref --verify --quiet "refs/heads/$BRANCH"; do
-      BRANCH="zettel/run-$(date -u +%Y%m%d%H%M%S)-$RANDOM"
-    done
-    git -C "$REPO" checkout -q -b "$BRANCH"
+    if [[ -n "$RUN_BRANCH" ]]; then
+      # An assigned branch keeps whatever it already carries: unmerged work
+      # on it is the session's, and resetting it would destroy that. It is
+      # fast-forwarded to the default branch when it is merely behind; one
+      # that has diverged (often history already squash-merged) is kept and
+      # flagged, because only a person can tell which it is.
+      BRANCH="$RUN_BRANCH"
+      if git -C "$REPO" show-ref --verify --quiet "refs/heads/$BRANCH"; then
+        git -C "$REPO" checkout -q "$BRANCH"
+      elif git -C "$REPO" show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
+        git -C "$REPO" checkout -q -b "$BRANCH" "origin/$BRANCH"
+      else
+        git -C "$REPO" checkout -q -b "$BRANCH"
+      fi
+      if ! git -C "$REPO" merge -q --ff-only "$DEFAULT_BRANCH" >/dev/null 2>&1; then
+        echo "warning: $BRANCH has commits that are not on $DEFAULT_BRANCH; if they were already merged, restart it from $DEFAULT_BRANCH" >&2
+      fi
+    else
+      # Second-resolution names collide when a run restarts within a second of
+      # the last (surfaced by the reasons test): uniquify rather than fail.
+      BRANCH="zettel/run-$(date -u +%Y%m%d%H%M%S)"
+      while git -C "$REPO" show-ref --verify --quiet "refs/heads/$BRANCH"; do
+        BRANCH="zettel/run-$(date -u +%Y%m%d%H%M%S)-$RANDOM"
+      done
+      git -C "$REPO" checkout -q -b "$BRANCH"
+    fi
+    # finish accepts zettel/run-* or the branch recorded here; the record lives
+    # inside .git, so it can never be committed.
+    echo "$BRANCH" > "$(git -C "$REPO" rev-parse --absolute-git-dir)/zettel-run-branch"
     trap - ERR
 
     # Make config.yml's model tiers authoritative for THIS session's subagents.
@@ -334,7 +373,9 @@ print("yes" if ok else f"no\t{holder.holder}\t{holder.session}\t{holder.age_hour
 
   finish)
     BRANCH="$(git -C "$REPO" branch --show-current)"
-    [[ "$BRANCH" == zettel/run-* ]] || die "not on a run branch (on '$BRANCH'); run 'start' first"
+    RECORDED="$(cat "$(git -C "$REPO" rev-parse --absolute-git-dir)/zettel-run-branch" 2>/dev/null || true)"
+    [[ "$BRANCH" == zettel/run-* || ( -n "$BRANCH" && "$BRANCH" == "$RECORDED" ) ]] \
+      || die "not on a run branch (on '$BRANCH'); run 'start' first"
 
     git -C "$REPO" fetch -q origin
     DEFAULT_BRANCH="$(default_branch)"

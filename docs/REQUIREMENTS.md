@@ -539,9 +539,22 @@ already allowed. The prompt's step 7 also now commits pending work *before*
 noting the base commit; noting it first put the cycle's own work inside the
 smith's strict diff.
 
-A cloud session pinned to a pre-assigned `claude/...` branch cannot use
-`finish`, which only finishes `zettel/run-*` branches; the prompts give the
-same steps by hand (gates, commit, `abort`, push, PR, auto-merge).
+A cloud session pinned to a pre-assigned `claude/...` branch could not use the
+flow at all: `start` always checked out the default branch and created a
+`zettel/run-*` one, and `finish` refused anything else. `start` and
+`session_cycle.sh` now take `--branch <name>`: the lock is claimed as before,
+the session stays on the named branch (checked out, or created from the
+default branch; fast-forwarded when merely behind; kept with a warning when
+it has diverged, since only a person can tell already-merged history from
+unmerged work), and `finish` accepts the branch `start` recorded. The default
+branch and the lock branch are refused as `--branch`.
+
+**Not covered: the laptop wrapper.** `maintenance_run.sh` still re-gates and
+pushes the branch it ran on, which on a laptop is usually the default branch;
+it opens no PR, and `tests/test_maintenance_run.py` asserts that push. Moving
+the laptop path onto a branch-and-PR handoff changes a tested contract and is
+left for a separate decision; the PR rule above is stated for session-run
+flows.
 
 -----
 

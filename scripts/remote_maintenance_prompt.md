@@ -14,6 +14,11 @@ Then claim the run and create a branch:
 
     {{SCRIPTS}}/remote_cycle.sh start --repo {{REPO}}
 
+If this session was assigned a branch it must work on (a cloud session's
+`claude/...` branch), add `--branch <that branch>`: `start` then claims the
+lock and keeps you on it instead of creating a `zettel/run-*` branch, and
+`finish` hands it off exactly as it would a run branch.
+
 If that exits 3, another run holds the lock. Stop immediately, do no work, and
 report that you stood down. That is a success, not a failure.
 
@@ -130,14 +135,8 @@ stand-down (exit 3), a branch carrying nothing beyond the default branch, or a
 cycle you aborted because it could not finish honestly -- and your report says
 which.
 
-**On a pre-assigned branch.** A cloud session may be required to work on a
-branch it was given (a `claude/...` branch). That branch is then your run branch
-for everything in this cycle, and `finish` -- which only finishes
-`zettel/run-*` branches -- is replaced by the same steps done by hand, in this
-order: `remote_cycle.sh gates`; commit everything, the lines the gates append
-included; `remote_cycle.sh abort --repo {{REPO}}` to release the lock, and
-commit the line it appends; push the branch; open the PR to the default branch
-and enable auto-merge (squash).
+**On a pre-assigned branch,** started with `start --branch`, `finish` works
+unchanged: it gates, commits, pushes that branch and releases the lock.
 
 If `finish` says to open the PR yourself (the GitHub CLI is not installed in
 remote containers), open it now with the GitHub MCP tools, then enable auto-merge

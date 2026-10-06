@@ -70,7 +70,8 @@ List them **with their ids** and say that on the user's word you will act.
 "$SCRIPTS/query.py" --repo <content-repo> "$ARGUMENTS" --file-gaps g1,g3
 
 # Or file them AND work them now, in this session:
-"$SCRIPTS/session_cycle.sh" query --repo <content-repo> --from-query "$ARGUMENTS"
+"$SCRIPTS/session_cycle.sh" query --repo <content-repo> --from-query "$ARGUMENTS" \
+  [--branch <assigned-branch>]
 ```
 
 The second claims the lock and opens a run branch **before** filing, so the

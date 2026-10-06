@@ -241,11 +241,14 @@ smith ran in a worktree, the merge back was refused, and the proposal sat on a
 local-only branch the owner had no way to see.
 
 **A pre-assigned branch.** A cloud session may be required to work on a branch
-it was given (`claude/...`). That branch is the run branch for the whole cycle.
-`finish` only finishes `zettel/run-*` branches, so the session does its steps by
-hand, in order: `remote_cycle.sh gates`; commit everything, the gates' own log
-lines included; `remote_cycle.sh abort` to release the lock, committing the line
-it appends; push; open the PR to the default branch and enable auto-merge.
+it was given (`claude/...`) and push nowhere else. `remote_cycle.sh start
+--branch <name>` (or `session_cycle.sh ... --branch <name>`) claims the lock and
+keeps the session on that branch -- checking it out if it exists, creating it
+from the default branch if not, fast-forwarding it when it is merely behind,
+and warning, without resetting, when it carries commits the default branch
+does not. `start` records the branch inside `.git`, and `finish` accepts it as
+it accepts a `zettel/run-*` branch. The default branch and the lock branch are
+refused as `--branch` before the lock is touched.
 
 ---
 
