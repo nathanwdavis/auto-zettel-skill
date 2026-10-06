@@ -431,9 +431,9 @@ print("yes" if ok else f"no\t{holder.holder}\t{holder.session}\t{holder.age_hour
         | sed -E 's#^(git@github\.com:|https://github\.com/)##; s#\.git$##')"
       echo "PUSHED_BRANCH=$BRANCH"
       if [[ "$ORIGIN_URL" == *github.com* && "$SLUG" == */* ]]; then
-        echo "open a PR for $BRANCH so the gates can run -- use whatever GitHub tooling this session has (the GitHub MCP tools in remote sessions): https://github.com/$SLUG/compare/$DEFAULT_BRANCH...$BRANCH"
+        echo "open a PR for $BRANCH now, against $DEFAULT_BRANCH, so the gates can run -- always, without asking (the owner's standing instruction); use whatever GitHub tooling this session has (the GitHub MCP tools in remote sessions): https://github.com/$SLUG/compare/$DEFAULT_BRANCH...$BRANCH"
       else
-        echo "open a PR for $BRANCH so the gates can run -- use whatever GitHub tooling this session has (the GitHub MCP tools in remote sessions)"
+        echo "open a PR for $BRANCH now, against $DEFAULT_BRANCH, so the gates can run -- always, without asking (the owner's standing instruction); use whatever GitHub tooling this session has (the GitHub MCP tools in remote sessions)"
       fi
       echo "then enable auto-merge on it (squash) so it lands exactly when the required gates check passes; never merge it yourself"
     fi

@@ -56,7 +56,7 @@ is layered, and each layer is only as fine-grained as its diff:
 | Structural, Mode A | `maintenance_run.sh` snapshots the plugin tree around the headless run; any change aborts unpushed | any write into the skill repo — the AC-37 red line |
 | Structural, Mode B | the plugin is a fresh CI checkout; the required `gates` check is server-side | same, by construction |
 | Diff gate, whole cycle | `check_skill_sandbox.py --base <pre-run HEAD>` in the wrapper and in CI | log.md rewrites, skill-impact.md edits, raw/ modification |
-| Diff gate, smith-scoped | `--strict` on the smith's isolated diff (worktree, or pre/post HEAD remotely) before merging it | any smith write outside `skills/` + the two ledgers |
+| Diff gate, smith-scoped | `--strict` on the smith's isolated diff (worktree on the laptop path; pre/post HEAD on the run branch remotely, never a separate branch) before merging it | any smith write outside `skills/` + the two ledgers |
 | Wellformedness | `lint_skills.py`, everywhere the other lints run | malformed skills, bad status, uncited PURPOSE, re-proposed creates |
 | Human | approval required for promotion; PR review in Mode B | everything judgment-shaped |
 
