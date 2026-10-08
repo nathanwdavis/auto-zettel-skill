@@ -85,6 +85,16 @@ def test_ask_keeps_the_adhoc_contract(content_repo):
     assert inquiry.startswith("inquiries/") and (repo / inquiry).exists()
 
 
+def test_ask_passes_an_assigned_branch_through_to_start(content_repo):
+    """A cloud session's assigned branch must survive the session flows too."""
+    repo, _ = content_repo
+    result = session(repo, "ask", "--question", "Does the branch survive?",
+                     "--branch", "claude/session-branch")
+    assert result.returncode == 0, result.stderr
+    assert current_branch(repo) == "claude/session-branch"
+    assert "claude/session-branch" in result.stdout
+
+
 def test_adhoc_wrapper_delegates_to_session_cycle(content_repo):
     """The old entry point still exists, still behaves, still exits the same."""
     repo, _ = content_repo

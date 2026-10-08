@@ -354,6 +354,86 @@ def test_push_denied_start_fails_clearly_not_as_standdown(content_repo):
     assert "Traceback" not in result.stderr, "failures must be reported, not crash"
 
 
+# --- start --branch: a session pinned to an assigned branch (amendment A15) ----
+
+def _git(repo, *args):
+    return subprocess.run(["git", "-C", str(repo), *args],
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_start_with_branch_works_and_finishes_on_the_assigned_branch(content_repo):
+    """A cloud session may push only to the branch it was given. start used to
+    abandon it for a fresh zettel/run-* branch, and finish refused anything
+    else, so the session had to carry its work back by hand."""
+    repo, origin = content_repo
+    main_before = _git(origin, "rev-parse", "main")
+
+    started = cycle(repo, "start", "--branch", "claude/assigned-abc")
+    assert started.returncode == 0, started.stderr
+    assert started.stdout.strip() == "claude/assigned-abc"
+    assert current_branch(repo) == "claude/assigned-abc"
+    assert gitlock.read(repo) is not None, "the lock is claimed as for any run"
+
+    (repo / "INBOX.md").write_text("# Inbox\n\nassigned-branch work\n", encoding="utf-8")
+    finished = cycle(repo, "finish", "--title", "Assigned-branch cycle")
+    assert finished.returncode == 0, finished.stderr
+    assert "claude/assigned-abc" in branches_on(origin)
+    assert not [b for b in branches_on(origin) if b.startswith("zettel/run-")]
+    assert gitlock.read(repo) is None, "the lock must always be released"
+    assert _git(origin, "rev-parse", "main") == main_before, "never main"
+
+
+def test_start_with_branch_keeps_unmerged_commits_on_an_existing_branch(content_repo):
+    """Work already on the assigned branch is the session's own: resetting the
+    branch to the default would destroy it."""
+    repo, _ = content_repo
+    _git(repo, "checkout", "-q", "-b", "claude/has-work")
+    (repo / "INBOX.md").write_text("# Inbox\n\nearlier work\n", encoding="utf-8")
+    _git(repo, "commit", "-qam", "earlier work")
+    kept = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", "main")
+
+    started = cycle(repo, "start", "--branch", "claude/has-work")
+    assert started.returncode == 0, started.stderr
+    assert current_branch(repo) == "claude/has-work"
+    _git(repo, "merge-base", "--is-ancestor", kept, "HEAD")  # raises if lost
+
+
+def test_start_with_branch_fast_forwards_a_branch_that_is_merely_behind(content_repo, tmp_path):
+    repo, origin = content_repo
+    _git(repo, "branch", "claude/behind")
+    other = tmp_path / "other"
+    subprocess.run(["git", "clone", "-q", str(origin), str(other)], check=True)
+    for key, value in (("user.name", "t"), ("user.email", "t@localhost")):
+        _git(other, "config", key, value)
+    (other / "README.md").write_text("moved on\n", encoding="utf-8")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-qm", "main moves on")
+    _git(other, "push", "-q", "origin", "main")
+
+    started = cycle(repo, "start", "--branch", "claude/behind")
+    assert started.returncode == 0, started.stderr
+    assert _git(repo, "rev-parse", "HEAD") == _git(origin, "rev-parse", "main")
+    assert "warning" not in started.stderr
+
+
+@pytest.mark.parametrize("name", ["main", "zettel/lock", "-x", "bad name"])
+def test_start_refuses_a_bad_branch_before_touching_the_lock(content_repo, name):
+    repo, _ = content_repo
+    result = cycle(repo, "start", "--branch", name)
+    assert result.returncode == 2, (result.returncode, result.stdout, result.stderr)
+    assert gitlock.read(repo) is None, "a usage error must never claim the lock"
+
+
+def test_finish_still_refuses_a_branch_start_did_not_record(content_repo):
+    repo, _ = content_repo
+    cycle(repo, "start", "--branch", "claude/recorded")
+    _git(repo, "checkout", "-q", "-b", "claude/somewhere-else")
+    result = cycle(repo, "finish")
+    assert result.returncode != 0
+    assert "not on a run branch" in result.stderr
+
+
 # --- abort --------------------------------------------------------------------
 
 def test_abort_releases_the_lock_and_keeps_the_branch(content_repo):

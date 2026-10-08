@@ -216,9 +216,11 @@ to get right:
   `status` and, when notes were written, `result_notes`.
 
 Hand off with `scripts/remote_cycle.sh finish --repo <repo> --title "..."`.
-If `finish` says to open the PR yourself (no `gh` in the container), open it
-with the GitHub MCP tools and enable auto-merge on it (squash) so it lands
-exactly when the required check passes. **An ad-hoc session never pushes to
+**Every flow ends in a PR to the default branch that the session opens
+itself** -- see [Rules that do not bend](#rules-that-do-not-bend). If `finish`
+says to open the PR yourself (no `gh` in the container), open it with the
+GitHub MCP tools and enable auto-merge on it (squash) so it lands exactly when
+the required check passes. **An ad-hoc session never pushes to
 `main` and never merges** — auto-merge is not merging; the check remains the
 authority. See `references/capture.md`.
 
@@ -368,7 +370,10 @@ groundedness + citation-coverage means in `skill-impact.md`. The scheduled
 paths run it automatically; by hand it is
 `scripts/skill_trial.py --repo <repo> --skill <name>`.
 
-**Promotion is a human act — always** (FR-36):
+**Promotion is a human act — always** (FR-36), and the human reviews the
+proposal on GitHub, so it is made in the cycle's own working tree and travels
+in the cycle's PR. Never leave one on a local-only branch or worktree: a cloud
+container is reclaimed, and with it every branch that was not pushed.
 
 ```sh
 scripts/skill_review.py --repo <repo> list
@@ -421,6 +426,20 @@ Read these only when the task calls for them:
 
 ## Rules that do not bend
 
+- **Every session-run maintenance cycle, ad-hoc question, ingest and
+  query-gap run ends in a PR to the default branch, opened by the session
+  itself.** This is the owner's standing instruction, so it is the explicit
+  request for a PR that a harness default may otherwise wait for: never ask
+  whether to open one. Only an odd case ends without one -- a stand-down, a
+  branch with nothing beyond the default branch, a cycle aborted because it
+  could not finish honestly -- and the report says which. A session assigned a
+  branch (a cloud session's `claude/...` branch) passes `--branch <name>` to
+  `remote_cycle.sh start` or `session_cycle.sh`, and `finish` hands that
+  branch off like any run branch. (The laptop wrapper, `maintenance_run.sh`,
+  still pushes the branch it ran on directly; see amendment A15.)
+- **Everything a cycle produces travels on the branch it pushes** -- notes,
+  captures, ledger lines and a skill-smith proposal alike. Nothing is left on
+  a local-only branch or worktree.
 - No token, key, or `.env` is ever committed to either repo.
 - The `raw/` layer is immutable — captures are never edited.
 - Knowledge notes are never rolled back to make something else pass.

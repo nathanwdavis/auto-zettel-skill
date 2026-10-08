@@ -510,6 +510,52 @@ The test suite had encoded the defect: its Open Library "miss" cassette was
 `200 {}`, the exact response the endpoint gives for books that exist. That
 response is now a fixture asserting the opposite.
 
+### A15 — Every session flow ends in a PR the session opens; proposals travel on the pushed branch (2026-10-06, FR-26, FR-28, FR-35, FR-36, A12)
+
+At the repository owner's direction, two standing rules for every maintenance
+cycle, ad-hoc question, ingest and query-gap run.
+
+**The session always opens the PR.** Each flow ends in a PR to the default
+branch, opened by the session that did the work, without asking. Cloud
+sessions ship with a harness default that opens a PR only on an explicit
+request; a live cycle on the sandbox content repository honoured that default,
+pushed its branch, and asked the owner whether to open one. The owner's
+instruction is that request, made once for all runs: the maintenance and
+session prompts, the router and sub-skills, and `remote_cycle.sh finish`'s own
+handoff text now state it, the script text included because a Routine's
+prompt freezes at creation and only the scripts refresh. Only a stand-down, a
+branch with nothing beyond the default branch, or a cycle aborted because it
+could not finish honestly ends without a PR, and the report says which.
+
+**Everything a cycle produces travels on the branch it pushes.** The same
+cycle ran its skill-smith in a separate worktree (FR-26's isolation, read
+literally). Merging it back was refused, and the proposal was left on a
+local-only branch in a container the owner cannot reach and that is reclaimed
+after use. FR-36 makes promotion a human act, which presupposes that the human
+can see the proposal. Remotely, the smith therefore works in the session's own
+tree on the run branch, and its isolation is the pre/post-HEAD
+`check_skill_sandbox.py --strict` diff that `references/skill-emergence.md`
+already allowed. The prompt's step 7 also now commits pending work *before*
+noting the base commit; noting it first put the cycle's own work inside the
+smith's strict diff.
+
+A cloud session pinned to a pre-assigned `claude/...` branch could not use the
+flow at all: `start` always checked out the default branch and created a
+`zettel/run-*` one, and `finish` refused anything else. `start` and
+`session_cycle.sh` now take `--branch <name>`: the lock is claimed as before,
+the session stays on the named branch (checked out, or created from the
+default branch; fast-forwarded when merely behind; kept with a warning when
+it has diverged, since only a person can tell already-merged history from
+unmerged work), and `finish` accepts the branch `start` recorded. The default
+branch and the lock branch are refused as `--branch`.
+
+**Not covered: the laptop wrapper.** `maintenance_run.sh` still re-gates and
+pushes the branch it ran on, which on a laptop is usually the default branch;
+it opens no PR, and `tests/test_maintenance_run.py` asserts that push. Moving
+the laptop path onto a branch-and-PR handoff changes a tested contract and is
+left for a separate decision; the PR rule above is stated for session-run
+flows.
+
 -----
 
 ## TL;DR

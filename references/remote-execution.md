@@ -219,6 +219,37 @@ Session work hands off through `remote_cycle.sh finish` like any cycle: a run
 branch, a PR, and the required check. There is no session path to `main`.
 See `references/capture.md`.
 
+## Every cycle ends in a PR the session opens
+
+A standing instruction from the owner (amendment A15): a maintenance cycle, an
+ad-hoc question, an ingest and a query-gap run all end in a PR to the default
+branch, and the session opens it itself. It never asks whether to. Cloud
+sessions carry a harness default that waits for an explicit request before
+opening a PR; this instruction *is* that request, and every prompt, sub-skill
+and the `finish` output say so, so that neither a stale Routine prompt nor a
+fresh one leaves the work merely pushed. The only cycles without a PR are the
+odd ones -- a stand-down, a branch with nothing beyond the default branch, a
+cycle aborted because it could not finish honestly -- and the report says which.
+
+**Everything the cycle produced travels on the pushed branch**, a skill-smith
+proposal included. The owner can only review what reaches GitHub, and a cloud
+container is reclaimed with every branch that was not pushed. So in a remote
+session the smith works in the session's own working tree, on the run branch,
+and its isolation is the pre/post-HEAD `check_skill_sandbox.py --strict` diff
+rather than a separate worktree. The 2026-10-06 sandbox cycle is why: its
+smith ran in a worktree, the merge back was refused, and the proposal sat on a
+local-only branch the owner had no way to see.
+
+**A pre-assigned branch.** A cloud session may be required to work on a branch
+it was given (`claude/...`) and push nowhere else. `remote_cycle.sh start
+--branch <name>` (or `session_cycle.sh ... --branch <name>`) claims the lock and
+keeps the session on that branch -- checking it out if it exists, creating it
+from the default branch if not, fast-forwarding it when it is merely behind,
+and warning, without resetting, when it carries commits the default branch
+does not. `start` records the branch inside `.git`, and `finish` accepts it as
+it accepts a `zettel/run-*` branch. The default branch and the lock branch are
+refused as `--branch` before the lock is touched.
+
 ---
 
 **Next:** [`scheduling.md`](scheduling.md) for the laptop paths, or [`two-mode-access.md`](two-mode-access.md) for reading without a clone.

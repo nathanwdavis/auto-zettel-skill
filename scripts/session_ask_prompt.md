@@ -58,9 +58,12 @@ reconstruct them from memory.
 
        {{SCRIPTS}}/remote_cycle.sh finish --repo {{REPO}} --title "Research: {{QUESTION}}"
 
-   If it says to open the PR yourself, open it with the GitHub MCP tools and
+   Always end with a PR to the default branch that you open yourself -- the
+   owner's standing instruction; never ask whether to open one. If it
+   says to open the PR yourself, open it now with the GitHub MCP tools and
    enable auto-merge (squash) so it lands exactly when the required check
-   passes.
+   passes. `finish` hands off a branch
+   started with `--branch` exactly as it does a `zettel/run-*` one.
 
 **Answer the user in chat**, with the sources you verified. They asked a
 question; the notes are the durable record, not the reply. File what is worth

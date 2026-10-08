@@ -70,7 +70,8 @@ List them **with their ids** and say that on the user's word you will act.
 "$SCRIPTS/query.py" --repo <content-repo> "$ARGUMENTS" --file-gaps g1,g3
 
 # Or file them AND work them now, in this session:
-"$SCRIPTS/session_cycle.sh" query --repo <content-repo> --from-query "$ARGUMENTS"
+"$SCRIPTS/session_cycle.sh" query --repo <content-repo> --from-query "$ARGUMENTS" \
+  [--branch <assigned-branch>]
 ```
 
 The second claims the lock and opens a run branch **before** filing, so the
@@ -79,7 +80,10 @@ overwrites. It prints a checklist for the work; follow it. Exit 3 means a
 scheduled run holds the lock: stand down and say so.
 
 After a plain `--file-gaps`, commit the captures; from a remote session that
-means a branch and a PR, like any other capture.
+means a branch and a PR, like any other capture. Whenever this flow writes
+anything, it ends in a PR to the default branch that you open yourself -- the
+owner's standing instruction; never ask whether to. A query that only reports
+writes nothing and needs no PR.
 
 ## Without a local clone (Mode B)
 

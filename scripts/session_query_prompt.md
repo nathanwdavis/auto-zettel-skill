@@ -52,8 +52,11 @@ Then, as with any cycle:
     {{SCRIPTS}}/remote_cycle.sh gates --repo {{REPO}}
     {{SCRIPTS}}/remote_cycle.sh finish --repo {{REPO}} --title "Close gaps: {{QUERY}}"
 
-If `finish` says to open the PR yourself, open it with the GitHub MCP tools
-and enable auto-merge (squash).
+Always end with a PR to the default branch that you open yourself -- the
+owner's standing instruction; never ask whether to open one. If `finish` says
+to open the PR yourself, open it now with the GitHub MCP tools and enable
+auto-merge (squash). `finish` hands off a branch
+started with `--branch` exactly as it does a `zettel/run-*` one.
 
 Close each inquiry you actually answered, and leave the ones you could not as
 `in-progress` with a note saying why:

@@ -23,8 +23,12 @@ citation gates.
 SCRIPTS="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)}/scripts"
 
 "$SCRIPTS/session_cycle.sh" ask --repo <content-repo> --question "$ARGUMENTS" \
-  [--priority high] [--body "extra context"]
+  [--priority high] [--body "extra context"] [--branch <assigned-branch>]
 ```
+
+`--branch` is for a session assigned a branch it must work on (a cloud
+session's `claude/...` branch): the cycle runs and hands off there instead of
+on a new `zettel/run-*` branch.
 
 **Then follow the checklist it prints.** It names the branch, the inquiry key,
 and the exact command for each step.
@@ -50,8 +54,10 @@ answer is.
    verified reference).
 4. **Gates, then hand off**: `remote_cycle.sh gates`, then
    `remote_cycle.sh finish`. `finish` re-runs the gates itself and refuses to
-   push a red branch. If it says to open the PR yourself, open it with the
-   GitHub MCP tools and enable auto-merge (squash).
+   push a red branch. Always end with a PR to the default branch that you
+   open yourself -- the owner's standing instruction; never ask whether to.
+   If `finish` says to open the PR yourself, open it with the GitHub MCP tools
+   and enable auto-merge (squash).
 
 ## Two things to get right at the end
 

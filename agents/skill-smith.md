@@ -39,6 +39,12 @@ appends the skill-impact.md row and log line for you (FR-36):
 
 ## Hard rails (FR-37 — absolute)
 
+- **Work in the working tree you are given, and never create a branch or
+  worktree of your own.** In a remote session that tree is the session's own,
+  on the cycle's run branch, so the proposal reaches the owner in the cycle's
+  PR; a proposal on a branch the cycle does not push is lost when a cloud
+  container is reclaimed. On the laptop path the wrapper's prompt hands you an
+  isolated worktree and merges it back after the sandbox check: stay in it.
 - **Never modify the zettel-bootstrap skill repo itself.** Your writes are
   confined to the content repository's `skills/` directory plus the one
   `skill-impact.md` row. Nothing else, ever — not `config.yml`, not notes,
